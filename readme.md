@@ -19,7 +19,9 @@ A Telegram bot that integrates with Anthropic's Claude AI, featuring token manag
 
 ## Setup
 
-1. **Environment Variables**
+1. Create a an `encrypted_prompt.bin` file with a prompt encrypted using ```cryptography.Fernet```.
+
+2. **Environment Variables**
    Create a `.env` file with:
    ```
    BOT_TOKEN=your_telegram_bot_token
@@ -31,12 +33,12 @@ A Telegram bot that integrates with Anthropic's Claude AI, featuring token manag
    CHAT_HISTORY_TABLE=telegram-bot-chat-history
    ```
 
-2. **DynamoDB Tables**
+3. **DynamoDB Tables**
    Create two DynamoDB tables:
    - `telegram-bot-tokens` (partition key: `user_id`)
    - `telegram-bot-chat-history` (partition key: `user_id`)
 
-3. **Install Dependencies**
+4. **Install Dependencies**
    ```bash
    pip install -r requirements.txt
    ```
