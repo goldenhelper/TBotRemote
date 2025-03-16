@@ -1,0 +1,11 @@
+BOT_USER_DESCRIPTION = "assistant"
+CHANCE_TO_COME_ALIVE = 0.1
+CHAT_HISTORY_DEPTH = 100
+SHORT_TERM_MEMORY = 10
+CLAUDE_MAX_TOKENS = 2048
+DEFAULT_COME_TO_LIFE_CHANCE = 0.1
+DEFAULT_TOKENS_FOR_NEW_USERS = 6000
+
+thinking_models_tokens = {  
+    'claude-3-7-sonnet-latest-extended-thinking': 1024
+}
