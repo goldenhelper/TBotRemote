@@ -2,9 +2,18 @@ import boto3
 import json
 import os
 
+
+def require_env(name: str) -> str:
+    value = os.getenv(name)
+    if value is None:
+        print(f"{name} is not set")
+        raise SystemExit(1)
+    return value
+
+
 if __name__ == "__main__":
-    param_name = os.getenv("ALLOWED_MODEL_LIMITS_PARAM", "/telegram-bot/allowed_model_limits")
-    region = os.getenv("AWS_REGION", "us-east-1")
+    param_name = require_env("ALLOWED_MODEL_LIMITS_PARAM")
+    region = require_env("AWS_REGION")
 
     provider = input("Provider (gemini/claude/openai): ").strip()
     model_name = input("Model name to remove: ").strip()

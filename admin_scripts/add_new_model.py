@@ -3,8 +3,15 @@ import json
 import os
 
 if __name__ == "__main__":
-    param_name = os.getenv("ALLOWED_MODEL_LIMITS_PARAM", "/telegram-bot/allowed_model_limits")
-    region = os.getenv("AWS_REGION", "us-east-1")
+    param_name = os.getenv("ALLOWED_MODEL_LIMITS_PARAM")
+    region = os.getenv("AWS_REGION")
+
+    if param_name is None:
+        print("ALLOWED_MODEL_LIMITS_PARAM is not set")
+        exit(1)
+    if region is None:
+        print("AWS_REGION is not set")
+        exit(1)
 
     provider = input("Provider (gemini/claude/openai): ").strip()
     model_name = input("Model name: ").strip()
