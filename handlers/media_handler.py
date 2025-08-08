@@ -171,8 +171,10 @@ class MediaHandler:
                 logger.info("Taking video branch")
                 # Handle video description
                 file_id = message.video.file_id
-                description = await self.describe_video(context.bot, file_id, message.video)
+                description, video_bytes = await self.describe_video(context.bot, file_id, message.video)
                 current_node.media_description = description
+                if video_bytes and self.main_supports_video:
+                    current_node.media_data = video_bytes
                 
             elif message.animation:
                 logger.info("Taking animation branch")
@@ -224,8 +226,10 @@ class MediaHandler:
                     current_node.media_type = 'video'
 
                     file_id = message.document.file_id
-                    description = await self.describe_video(context.bot, file_id, message.document)
+                    description, video_bytes = await self.describe_video(context.bot, file_id, message.document)
                     current_node.media_description = description
+                    if video_bytes and self.main_supports_video:
+                        current_node.media_data = video_bytes
                 else:
                     # Handle as regular document
                     description = self.describe_document(message.document)
@@ -250,30 +254,58 @@ class MediaHandler:
             
         return current_node
     
-    async def describe_video(self, bot, file_id: str, video_info) -> str:
+    async def describe_video(self, bot, file_id: str, video_info) -> tuple[str, bytes | None]:
         """
-        Describe a video based on its metadata.
+        Describe a video using specialized analysis (similar to GIF/animation handling).
         
         Args:
             bot: Telegram bot instance
             file_id (str): ID of the video file
-            video_info: Telegram video object with metadata
+            video_info: Telegram video or document object containing metadata
             
         Returns:
-            str: Description of the video
+            tuple[str, bytes | None]: Description text and, when ``main_supports_video`` is True, raw video bytes for inline attachment.
         """
+        logger.info(f"describe_video called with file_id={file_id}")
+        video_data: bytes | None = None
         try:
-            # For now, we'll use metadata description
-            # In the future, we could download a frame and analyze it
-            duration = video_info.duration if video_info.duration else "unknown"
-            width = video_info.width if video_info.width else "unknown"
-            height = video_info.height if video_info.height else "unknown"
-            
-            return f"[Video: {duration}s, {width}x{height}]"
-            
+            duration = getattr(video_info, 'duration', None) or 'unknown'
+            width = getattr(video_info, 'width', None) or 'unknown'
+            height = getattr(video_info, 'height', None) or 'unknown'
+
+            # Attempt to download the video bytes so we can analyse / inline it later
+            try:
+                video_data = await self.image_service.download_image(bot, file_id)
+
+                if video_data and len(video_data) > 0:
+                    # Derive MIME type (prefer Telegram's if available)
+                    mime_type = getattr(video_info, 'mime_type', None)
+                    if not mime_type:
+                        mime_type = 'image/gif' if video_data[:3] == b'GIF' else 'video/mp4'
+
+                    analysis_prompt = self.get_video_analysis_prompt(duration, width, height)
+
+                    analysis_result = None
+                    # If the main chat model cannot accept inline video, offload to video_analyzer
+                    if not self.main_supports_video and self.video_analyzer:
+                        logger.info(f"Using video analyzer to analyze video {file_id}")
+                        analysis_result = await self.video_analyzer.analyze_video(video_data, mime_type, analysis_prompt)
+
+                    if analysis_result:
+                        logger.info(f"Video analysis completed: '{analysis_result[:100]}…'")
+                        description = f"[Video: {duration}s, {width}x{height}] {analysis_result}"
+                        return description, video_data if self.main_supports_video else None
+            except Exception as inner_exc:
+                logger.error(f"Error downloading/analyzing video {file_id}: {inner_exc}")
+
+            # Fallback – no analysis available or download failed
+            fallback_desc = f"[Video: {duration}s, {width}x{height} - please analyze the visual content, motion, and any actions]"
+            logger.info(f"Generated fallback video description: '{fallback_desc}'")
+            return fallback_desc, video_data if self.main_supports_video else None
+
         except Exception as e:
-            logger.error(f"Error describing video: {str(e)}")
-            return "[Video]"
+            logger.error(f"Error describing video: {e}")
+            return "[Video - please analyze the visual content]", None
     
     async def describe_sticker(self, sticker) -> str:
         """

@@ -32,17 +32,16 @@ user_commands = {
     "/tokens_amount": "Показывает как долго ботик еще сможет терпеть этот чат.", 
     "/ask_for_tokens": "Поныть на токены и, может, Мишка зарядит ботика.",
     "/set_aliveness" : "Устанавливает активность ботика.",
-    "/how_alive" : "Показывает насколько ботик живой."
+    "/how_alive" : "Показывает насколько ботик живой.",
+    "/clear_history" : "Чистка истории (но не совести))",
+    "/get_role" : "Показывает текущую роль.",
+    "/add_role" : "Добавляет новую личность боту! Инструкция: /add_role имя_личности. Затем бот спросит вас об описании",
+    "/choose_role": "Выбрать роль для бота."
 }
 
 admin_commands = {
-    "/set_model" : "Меняет модельку.", 
     "/get_model_data" : "Показывает текущую модельку.", 
-    "/set_role" : "Меняет роль.", 
-    "/get_role" : "Показывает текущую роль.",
     "/give_bot_tokens" : "Дает боту токены.",
-    "/clear_history" : "Чистка истории (но не совести))",
-    "/choose_role": "Выбрать роль для бота."
 }   
 
 DEBUG = True
@@ -319,7 +318,15 @@ class MainHandler:
 
         await self.deduct_tokens(chat_id, input_tokens, output_tokens, self.llm_service.output_tokens_multiplier)
 
-        bot_message = await update.message.reply_text(response_text)
+        # Sanitize model output: strip media headers like "[GIF/Animation: ...]" and any accidental
+        # metadata lines such as "message_id: ..., reply_to_id: ..., assistant[...]" that the model
+        # might have echoed.
+        cleaned_text = re.sub(r'^\s*message_id:[^\n]*\n?', '', response_text, flags=re.IGNORECASE)
+
+        # Remove leading bracketed media description (Image/GIF/Video/Sticker/Document) if present
+        cleaned_text = re.sub(r'^\s*\[(?:Image|GIF/Animation|Video|Sticker|Document):[^\]]*\]\s*', '', cleaned_text, flags=re.IGNORECASE)
+
+        bot_message = await update.message.reply_text(cleaned_text)
         
         # Store user's message
         bot_message = ChatMessage(
@@ -414,6 +421,10 @@ class MainHandler:
 
             chat_id = update.effective_chat.id
 
+            # Explicitly add the current message to history before gathering context
+            current_node = ChatMessage.from_telegram_message(update.message)
+            await self.storage.add_message(chat_id, current_node)
+
             # Handle admin responses
             if (chat_id == self.admin_user_id or update.message.from_user.id in self.cool_user_ids) and update.message.reply_to_message:
                 if await self.handle_admin_response(update, context):
@@ -457,13 +468,24 @@ class MainHandler:
                 init_kwargs['video_analyzer'] = video_analyzer
             self.llm_service = service_cls(**init_kwargs)
 
+            # Initialise memory updater service. It can be a different provider than the main LLM,
+            # so determine its provider independently.
+
+            mu_provider_key = _provider_key(memory_updater_model_name)
+            mu_service_cls  = PROVIDERS[mu_provider_key]
+
             mu_kwargs = {
-                'api_key': self.api_keys[provider_key],
+                'api_key': self.api_keys[mu_provider_key],
                 'model_name': memory_updater_model_name,
             }
-            if provider_key == 'gemini':
+
+            # Only pass the video analyzer if the memory updater itself is not Gemini.
+            # GeminiService already supports multimodal natively and passing another Gemini
+            # instance can create unnecessary recursion.
+            if mu_provider_key != 'gemini':
                 mu_kwargs['video_analyzer'] = video_analyzer
-            self.memory_updater = service_cls(**mu_kwargs)
+
+            self.memory_updater = mu_service_cls(**mu_kwargs)
 
             # Set context for media handler (role, chat type, and long-term notes)
             self.media_handler.set_context(
@@ -1026,7 +1048,7 @@ class MainHandler:
         await update.message.reply_text(f"Tokens have been added to the bot!")
 
 
-    @command_for_admin
+    @command_in_identified_chats
     async def clear_chat_history_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Clear the chat history"""
         await self.storage.clear_chat_history(update.message.chat_id)

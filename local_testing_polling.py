@@ -55,14 +55,6 @@ def main():
         region_name=config.aws_region
     ).get_parameter(Name='/telegram-bot/system-prompt/formatting-info')['Parameter']['Value']
 
-    role_prompt = boto3.client(
-        'ssm',
-        aws_access_key_id=config.aws_access_key_id,
-        aws_secret_access_key=config.aws_secret_access_key,
-        region_name=config.aws_region
-    ).get_parameter(Name='/telegram-bot/system-prompt/role')['Parameter']['Value']
-
-    
     
     role_manager = RoleManager(
         table_name=config.role_table_name, 
@@ -82,7 +74,6 @@ def main():
     #     role_manager=role_manager
     # )
 
-    
     storage = FileStorage(
         storage_dir="chat_history", 
         default_role_id=config.default_role_id,

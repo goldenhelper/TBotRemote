@@ -49,7 +49,7 @@ class Storage(ABC):
         pass
     
     @abstractmethod
-    async def load_conversation(self, chat_id: int) -> "ConversationTracker":
+    async def load_conversation(self, *, chat_id: int) -> "ConversationTracker":
         """Load conversation state"""
         pass
     
@@ -140,11 +140,10 @@ class Storage(ABC):
         chat_id = message.chat_id
         
         # Load conversation tracker from storage
-        tracker = await self.load_conversation(chat_id)
+        tracker = await self.load_conversation(chat_id=chat_id)
         
-        # Add current message to tracker
+        # Prepare current message node (it will already be stored by the caller)
         current_node = ChatMessage.from_telegram_message(message)
-        tracker.add_message(current_node)
         
         context_messages = []
         seen_messages = set()
@@ -171,9 +170,6 @@ class Storage(ABC):
 
         # Add recent messages to context
         context_messages.extend(recent_messages)
-        
-        # Save the updated conversation
-        await self.save_conversation(chat_id, tracker)
         
         # Sort messages by message_id to ensure correct chronological order
         context_messages.sort(key=lambda x: x.message_id)
@@ -241,7 +237,7 @@ class AWSStorage(Storage):
             'timestamp': datetime.now().strftime("%a, %d. %b %Y %H:%M"),
             'messages': tracker.get_messages_dict(),
             'reply_graph': {str(k): v for k, v in tracker.reply_graph.items()},
-            'role': tracker.role if tracker.role else self.default_role,
+            'current_role_id': tracker.current_role_id if getattr(tracker, 'current_role_id', None) else self.default_role_id,
             'notes': tracker.notes if tracker.notes else "",
             'ttl': int((datetime.now() + timedelta(days=1)).timestamp())
         })
@@ -268,7 +264,7 @@ class AWSStorage(Storage):
     async def add_message(self, chat_id: int, message: ChatMessage):
         """Add a single message to the conversation history"""
         # Load existing data if available
-        tracker = await self.load_conversation(chat_id)
+        tracker = await self.load_conversation(chat_id=chat_id)
         
         # Add new message to the data
         tracker.add_message(message)
@@ -278,7 +274,7 @@ class AWSStorage(Storage):
     
     async def update_message_description(self, chat_id: int, message_id: int, new_description: str):
         """Update the media description of a specific message in AWSStorage"""
-        tracker = await self.load_conversation(chat_id)
+        tracker = await self.load_conversation(chat_id=chat_id)
         
         if message_id in tracker.messages:
             tracker.messages[message_id].media_description = new_description
@@ -297,8 +293,8 @@ class AWSStorage(Storage):
             'chat_id': str(chat_id),
             'model': self.default_model,
             'memory_updater_model': self.default_memory_updater_model,
-            'current_role_id': self.default_role,
-            'available_roles_ids': self.global_roles_ids,
+            'current_role_id': self.default_role_id,
+            'available_roles_ids': [],
             'messages': {},
             'notes': {'text': '', 'last_updated_msgs_ago': 0},
             'come_to_life_chance': self.default_come_to_life_chance,
@@ -466,7 +462,6 @@ class AWSStorage(Storage):
         
         return update_notes
         
-
 class FileStorage(Storage):
     def __init__(self, storage_dir: str, default_role_id: str, default_model: str, role_manager: RoleManager,
                  default_memory_updater_model: str | None = None, 
@@ -505,44 +500,13 @@ class FileStorage(Storage):
         with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     
-    async def load_conversation(self, chat_id: int) -> "ConversationTracker":
-        """Load conversation state from a JSON file"""
-        file_path = self._get_file_path(chat_id)
-        tracker = ConversationTracker(self)
-        
-        if os.path.exists(file_path):
-            with open(file_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                messages = data.get('messages', {})
-                for msg_data in messages.values():
-                    # Backward compatibility for old message format
-                    if 'emoji' in msg_data:
-                        msg_data['sticker'] = {
-                            "emoji": msg_data.pop('emoji', None),
-                            "is_animated": msg_data.pop('is_animated', None),
-                            "is_video": msg_data.pop('is_video', None)
-                        }
-                    
-                    # Ensure sticker is a dict if it's None from old data
-                    if 'sticker' not in msg_data or msg_data['sticker'] is None:
-                        msg_data['sticker'] = {"emoji": None, "is_animated": None, "is_video": None}
-
-                    node = ChatMessage(**msg_data)
-                    tracker.add_message(node)
-                tracker.current_role_id = data.get('current_role_id', self.default_role_id)
-                tracker.available_roles_ids = data.get('available_roles_ids', [])
-                tracker.model = data.get('model', self.default_model)
-                tracker.memory_updater_model = data.get('memory_updater_model', self.default_memory_updater_model)
-                tracker.notes = data.get('notes', {"text": "", "last_updated_msgs_ago": 0})
-                tracker.come_to_life_chance = data.get('come_to_life_chance', self.default_come_to_life_chance)
-        
-        return tracker
+    
 
     async def add_message(self, chat_id: int, message: ChatMessage):
         """Add a single message to the conversation history"""
         
         # Load existing data if available
-        tracker = await self.load_conversation(chat_id)
+        tracker = await self.load_conversation(chat_id=chat_id)
         
         # Add new message to the data
         tracker.add_message(message)
@@ -552,7 +516,7 @@ class FileStorage(Storage):
     
     async def update_message_description(self, chat_id: int, message_id: int, new_description: str):
         """Update the media description of a specific message in FileStorage"""
-        tracker = await self.load_conversation(chat_id)
+        tracker = await self.load_conversation(chat_id=chat_id)
         
         if message_id in tracker.messages:
             tracker.messages[message_id].media_description = new_description
@@ -598,6 +562,40 @@ class FileStorage(Storage):
             await self.initialize_chat(chat_id)            
             return await func(self, *args, **kwargs)
         return wrapper
+    
+    @initialize_if_not_exists
+    async def load_conversation(self, *, chat_id: int) -> "ConversationTracker":
+        """Load conversation state from a JSON file"""
+        file_path = self._get_file_path(chat_id)
+        tracker = ConversationTracker(self)
+        
+        if os.path.exists(file_path):
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                messages = data.get('messages', {})
+                for msg_data in messages.values():
+                    # Backward compatibility for old message format
+                    if 'emoji' in msg_data:
+                        msg_data['sticker'] = {
+                            "emoji": msg_data.pop('emoji', None),
+                            "is_animated": msg_data.pop('is_animated', None),
+                            "is_video": msg_data.pop('is_video', None)
+                        }
+                    
+                    # Ensure sticker is a dict if it's None from old data
+                    if 'sticker' not in msg_data or msg_data['sticker'] is None:
+                        msg_data['sticker'] = {"emoji": None, "is_animated": None, "is_video": None}
+
+                    node = ChatMessage(**msg_data)
+                    tracker.add_message(node)
+                tracker.current_role_id = data.get('current_role_id', self.default_role_id)
+                tracker.available_roles_ids = data.get('available_roles_ids', [])
+                tracker.model = data.get('model', self.default_model)
+                tracker.memory_updater_model = data.get('memory_updater_model', self.default_memory_updater_model)
+                tracker.notes = data.get('notes', {"text": "", "last_updated_msgs_ago": 0})
+                tracker.come_to_life_chance = data.get('come_to_life_chance', self.default_come_to_life_chance)
+        
+        return tracker
 
     @initialize_if_not_exists
     async def get_current_role_id(self, *, chat_id: int) -> str:

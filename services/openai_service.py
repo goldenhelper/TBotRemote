@@ -13,7 +13,7 @@ DEBUG = True
 
 # OpenAI reasoning models that have different behavior
 OPENAI_REASONING_MODELS = [
-    "o3-2025-04-16"
+    "gpt-5-2025-08-07"
 ]
 
 class OpenAIService(BaseAIService):

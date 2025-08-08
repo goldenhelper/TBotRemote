@@ -15,23 +15,6 @@ logger = logging.getLogger(__name__)
 
 PARAMETER_NAME = "/telegram-bot/model_data"
 
-
-allowed_models_limits = {}
-
-allowed_models_limits['gemini'] = OrderedDict([
-    ("gemini-2.5-flash-preview-05-20", 500),
-    ("gemini-2.5-pro-preview-06-05", 100)
-])
-
-allowed_models_limits['claude'] = OrderedDict([
-    ("claude-4-opus-latest", 1000),
-    ("claude-4-sonnet-latest", 1000)
-])
-
-allowed_models_limits['openai'] = OrderedDict([
-    ("o3-2025-04-16", 500)
-])
-
 DEBUG = True
 
 def log(*args, **kwargs):
@@ -39,47 +22,46 @@ def log(*args, **kwargs):
         print(*args, **kwargs)
 
 class ModelManager:
-    def __init__(self, token_table_name: str, region: str):
+    def __init__(self, token_table_name: str, model_usage_table_name: str, allowed_models_limits_resource_name: str, region: str):
         self.dynamodb = boto3.resource('dynamodb', region_name=region)
         self.token_table = self.dynamodb.Table(token_table_name)
-        self.ssm_client = boto3.client('ssm', region_name=region)      
+        self.model_usage_table = self.dynamodb.Table(model_usage_table_name)    
 
+        # Parameter Store resource name for allowed models limits
+        self.ssm_client = boto3.client('ssm', region_name=region)
+        self.allowed_models_limits_resource_name = allowed_models_limits_resource_name
 
     def get_model_data(self):
-        """Retrieve the JSON object from Parameter Store."""
-        response = self.ssm_client.get_parameter(Name=PARAMETER_NAME)
-        model_data = json.loads(response['Parameter']['Value'])
-        return model_data
+        
+        response = self.model_usage_table.get_item(Key={'model_name': 'all'})
+        return response['Item']
         
         
     def reset_model_data(self):
-        initial_model_data = {}
-        for model_type in allowed_models_limits:
-            for model in allowed_models_limits[model_type].keys():
-                initial_model_data[model] = 0
-
-        self.ssm_client.put_parameter(
-            Name=PARAMETER_NAME,
-            Value=json.dumps(initial_model_data),
-            Type='String',
-            Overwrite=True
+        """Reset all query counts to 0."""
+        self.model_usage_table.update_item(
+            Key={'model_name': 'all'},
+            UpdateExpression='SET query_count = :zero',
+            ExpressionAttributeValues={':zero': 0}
         )
 
 
     def used_model(self, model_name: str):
-        model_data = self.get_model_data()
-        model_data[model_name] += 1
-
-        self.ssm_client.put_parameter(
-            Name=PARAMETER_NAME,
-            Value=json.dumps(model_data),
-            Type='String',
-            Overwrite=True
+        # increment query count for the model
+        self.model_usage_table.update_item(
+            Key={'model_name': model_name},
+            UpdateExpression='SET query_count = query_count + :one',
+            ExpressionAttributeValues={':one': 1}
         )
         
 
     def best_allowed_model(self, model_name: str) -> str:
+        """Find the best allowed model based on the query count."""
         model = None
+
+        # Get allowed models limits from Parameter Store
+        response = self.ssm_client.get_parameter(Name=self.allowed_models_limits_resource_name)
+        allowed_models_limits = json.loads(response['Parameter']['Value'])
 
         if model_name.lower().startswith("gemini"):
             for model, limit in allowed_models_limits['gemini'].items():
@@ -90,7 +72,7 @@ class ModelManager:
             for model, limit in allowed_models_limits['claude'].items():
                 if self.get_model_data()[model] < limit:
                     return model
-        elif model_name.lower().startswith("openai") or model_name.lower().startswith("gpt") or model_name.lower().startswith("o1"):
+        elif model_name.lower() in allowed_models_limits['openai']:
             for model, limit in allowed_models_limits['openai'].items():
                 if self.get_model_data()[model] < limit:
                     return model

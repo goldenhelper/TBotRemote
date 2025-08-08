@@ -11,6 +11,7 @@ from PIL import Image
 import base64
 import asyncio
 from google.genai import errors as genai_errors
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,8 @@ class GeminiService(BaseAIService):
                         Part(inline_data=Blob(data=video_data, mime_type=mime_type))
                     ]
                 )]
+                
+                logger.info(f"Sending request to video analysis model '{self.model_name}' with system prompt: {system_prompt}")
                 
                 config = GenerateContentConfig(system_instruction=system_prompt)
                 
@@ -215,7 +218,7 @@ class GeminiService(BaseAIService):
             if self.thinking_model:
                 config.thinking_config = ThinkingConfig(include_thoughts=True)
 
-            logger.info(f"Sending request to main Gemini model '{self.model_name}' with system prompt.")
+
             
             # Enhanced debug logging for media content
             for i, content_item in enumerate(contents):
@@ -252,6 +255,8 @@ class GeminiService(BaseAIService):
             response = None
             max_retries = 3
             delay = 2
+            # Track if we've already attempted an image fallback conversion / removal
+            image_fallback_attempted = False
             for attempt in range(max_retries):
                 try:
                     response = self.client.models.generate_content(
@@ -269,6 +274,52 @@ class GeminiService(BaseAIService):
                         delay *= 2
                         continue
                     else:
+                        raise
+                except genai_errors.ClientError as ce:
+                    # Handle invalid image arguments from Gemini
+                    err_msg = str(ce)
+                    if ("Unable to process input image" in err_msg) and not image_fallback_attempted:
+                        logger.warning("Gemini could not process one or more images. Attempting JPEG conversion / placeholder fallback and retrying once.")
+
+                        def _sanitize_parts(parts: List[Part]) -> List[Part]:
+                            sanitized = []
+                            for p in parts:
+                                if getattr(p, 'inline_data', None) is not None:
+                                    try:
+                                        # Attempt to load image and convert to JPEG which Gemini reliably supports
+                                        img_bytes = getattr(p.inline_data, 'data', None)
+                                        if img_bytes:
+                                            try:
+                                                img = Image.open(io.BytesIO(img_bytes))
+                                                jpeg_buf = io.BytesIO()
+                                                img.convert('RGB').save(jpeg_buf, format='JPEG')
+                                                sanitized.append(Part(inline_data=Blob(data=jpeg_buf.getvalue(), mime_type='image/jpeg')))
+                                                continue
+                                            except Exception as conv_exc:
+                                                logger.debug(f"JPEG conversion failed: {conv_exc}")
+                                        # If conversion failed, fall back to text placeholder
+                                        sanitized.append(Part(text='[Image omitted due to processing error]'))
+                                    except Exception as inner_exc:
+                                        logger.debug(f"Image sanitization error: {inner_exc}")
+                                        sanitized.append(Part(text='[Image omitted due to processing error]'))
+                                else:
+                                    sanitized.append(p)
+                            return sanitized
+
+                        # Rebuild contents with sanitized parts (no problematic inline images)
+                        new_contents = []
+                        for c in contents:
+                            if hasattr(c, 'parts'):
+                                new_contents.append(Content(role=c.role, parts=_sanitize_parts(c.parts)))
+                            else:
+                                new_contents.append(c)
+
+                        contents = new_contents
+                        image_fallback_attempted = True
+                        # after adjusting, retry the same attempt index (do not increment attempt) with same delay
+                        continue
+                    else:
+                        # Re-raise for other client errors or if fallback already attempted
                         raise
             
             if response is None:
@@ -298,8 +349,10 @@ class GeminiService(BaseAIService):
             if thinking_summary:
                 logger.debug(f"Returning thinking summary snippet: {thinking_summary[:100]}...")
 
+            # Clean the response text before sending
+            clean = re.sub(r'^\[(?:Image|GIF/Animation|Video|Sticker|Document):[^\]]*\]\s*', '', text, flags=re.I)
             return (
-                text,
+                clean,
                 prompt_tokens,
                 candidates_tokens,
                 thinking_summary,
