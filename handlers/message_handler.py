@@ -6,7 +6,7 @@ from typing import List, Callable
 
 from urllib3 import response
 from models import ChatMessage
-from services.model_manager import ModelManager, allowed_models_limits
+from services.model_manager import ModelManager
 from services.claude_service import ClaudeService
 from services.gemini_service import GeminiService
 from services.openai_service import OpenAIService
@@ -694,9 +694,8 @@ class MainHandler:
 
         # check if the chat has enough tokens
         balance = await self.model_manager.get_tokens(update.effective_chat.id)
-
-
-        data = self.model_manager.get_model_data()
+        usage = self.model_manager.get_all_model_usage()
+        limits = self.model_manager.get_allowed_models_limits()
         model = self.llm_service.model_name
         if model.startswith('gemini'):
             model_lineika = 'gemini'
@@ -707,12 +706,12 @@ class MainHandler:
         else:
             model_lineika = 'unknown'  # Should not happen, caught earlier
 
-        if model not in allowed_models_limits.get(model_lineika, {}):
+        if model not in limits.get(model_lineika, {}):
             await self.send_error_message(update, context, f"The model is not in allowed_models_limits. Model: {model}")
             return
 
     
-        if allowed_models_limits[model_lineika][model] is not None and data[model] >= allowed_models_limits[model_lineika][model]:
+        if limits[model_lineika][model] is not None and usage.get(model, 0) >= limits[model_lineika][model]:
             self.set_model(self.model_manager.best_allowed_model(model))
             await update.message.reply_text(f"Сори, бро, моделька устала. Моделька сменилась на лучшую доступную модельку этой линейки.")
 
@@ -931,20 +930,21 @@ class MainHandler:
         """Set the current model using buttons"""
         # Create buttons for Gemini models
         keyboard = []
-        
+        limits = self.model_manager.get_allowed_models_limits()
+
         # Add Gemini models
         gemini_buttons = []
-        for model in allowed_models_limits['gemini'].keys():
+        for model in limits.get('gemini', {}).keys():
             gemini_buttons.append(InlineKeyboardButton(model, callback_data=f"choose_model_{model}"))
         
         # Add Claude models
         claude_buttons = []
-        for model in allowed_models_limits['claude'].keys():
+        for model in limits.get('claude', {}).keys():
             claude_buttons.append(InlineKeyboardButton(model, callback_data=f"choose_model_{model}"))
 
         # Add OpenAI models
         openai_buttons = []
-        for model in allowed_models_limits['openai'].keys():
+        for model in limits.get('openai', {}).keys():
             openai_buttons.append(InlineKeyboardButton(model, callback_data=f"choose_model_{model}"))
         
         # Add buttons to keyboard
@@ -978,7 +978,7 @@ class MainHandler:
     @command_for_admin
     async def get_model_data_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Get the model data"""
-        model_data = self.model_manager.get_model_data()
+        model_data = self.model_manager.get_all_model_usage()
         current_model = await self.storage.get_model(chat_id=update.message.chat_id)
         text = f"Current model (in this chat): {current_model}\nData across all chats:\n"
         for model in model_data:
@@ -1128,16 +1128,17 @@ class MainHandler:
             is_global = args[2].lower() in ('true', 'yes', '1') if len(args) > 2 else True
             
             # Find the role by name
-            roles = self.role_manager.get_role_by_name(role_name)
+            roles = await self.role_manager.get_role_by_name(role_name)
             if not roles:
                 await update.message.reply_text(f"Role '{role_name}' not found")
                 return
                 
             if len(roles) > 1:
-                await update.message.reply_text(f"More than one role found: {', '.join([role.name for role in roles])}")
+                await update.message.reply_text(f"More than one role found: {', '.join([r.name for r in roles])}")
                 return
             
             # Update the role's global status
+            role = roles[0]
             if is_global:
                 self.role_manager.make_role_global(role.id)
                 await update.message.reply_text(f"Role '{role_name}' is now global")

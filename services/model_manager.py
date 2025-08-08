@@ -9,7 +9,7 @@ from models import TokenTransaction, TransactionStatus, TransactionType
 from exceptions import TokenError
 import json
 from collections import OrderedDict
-from utils.constants import DEFAULT_TOKENS_FOR_NEW_USERS
+from utils.constants import DEFAULT_TOKENS_FOR_NEW_USERS, ALLOWED_MODELS_LIMITS
 
 logger = logging.getLogger(__name__)
 
@@ -31,57 +31,82 @@ class ModelManager:
         self.ssm_client = boto3.client('ssm', region_name=region)
         self.allowed_models_limits_resource_name = allowed_models_limits_resource_name
 
-    def get_model_data(self):
-        
-        response = self.model_usage_table.get_item(Key={'model_name': 'all'})
-        return response['Item']
+
+    def _load_allowed_models_limits(self) -> dict:
+        """Load allowed models limits from SSM with fallback to local constants."""
+        try:
+            response = self.ssm_client.get_parameter(Name=self.allowed_models_limits_resource_name)
+            return json.loads(response['Parameter']['Value'])
+        except Exception:
+            return ALLOWED_MODELS_LIMITS
         
         
     def reset_model_data(self):
-        """Reset all query counts to 0."""
-        self.model_usage_table.update_item(
-            Key={'model_name': 'all'},
-            UpdateExpression='SET query_count = :zero',
-            ExpressionAttributeValues={':zero': 0}
-        )
+        """Reset query counts to 0 for all known models."""
+        limits = self._load_allowed_models_limits()
+        for provider_models in limits.values():
+            for model_name in provider_models.keys():
+                self.model_usage_table.update_item(
+                    Key={'model_name': model_name},
+                    UpdateExpression='SET query_count = :zero',
+                    ExpressionAttributeValues={':zero': 0}
+                )
 
 
     def used_model(self, model_name: str):
-        # increment query count for the model
+        """Atomically increment usage counter for a model."""
         self.model_usage_table.update_item(
             Key={'model_name': model_name},
-            UpdateExpression='SET query_count = query_count + :one',
+            UpdateExpression='ADD query_count :one',
             ExpressionAttributeValues={':one': 1}
         )
         
 
+    def _get_model_query_count(self, model_name: str) -> int:
+        """Return current query_count for a model, defaulting to 0 if absent."""
+        resp = self.model_usage_table.get_item(Key={'model_name': model_name})
+        item = resp.get('Item')
+        if not item:
+            return 0
+        return int(item.get('query_count', 0))
+
+    def get_model_usage(self, model_name: str) -> int:
+        """Public method to get current usage for a model."""
+        return self._get_model_query_count(model_name)
+
+    def get_all_model_usage(self) -> dict:
+        """Return usage counts for all known models from limits."""
+        limits = self._load_allowed_models_limits()
+        usage: dict[str, int] = {}
+        for provider_models in limits.values():
+            for model_name in provider_models.keys():
+                usage[model_name] = self._get_model_query_count(model_name)
+        return usage
+
+    def get_allowed_models_limits(self) -> dict:
+        """Expose allowed models limits mapping (SSM or fallback)."""
+        return self._load_allowed_models_limits()
+
     def best_allowed_model(self, model_name: str) -> str:
-        """Find the best allowed model based on the query count."""
-        model = None
+        """Pick the first model under its allowed limit for the given provider family."""
+        requested = model_name.lower()
+        limits = self._load_allowed_models_limits()
 
-        # Get allowed models limits from Parameter Store
-        response = self.ssm_client.get_parameter(Name=self.allowed_models_limits_resource_name)
-        allowed_models_limits = json.loads(response['Parameter']['Value'])
-
-        if model_name.lower().startswith("gemini"):
-            for model, limit in allowed_models_limits['gemini'].items():
-                if self.get_model_data()[model] < limit:
-                    return model
-            
-        elif model_name.lower().startswith("claude"):
-            for model, limit in allowed_models_limits['claude'].items():
-                if self.get_model_data()[model] < limit:
-                    return model
-        elif model_name.lower() in allowed_models_limits['openai']:
-            for model, limit in allowed_models_limits['openai'].items():
-                if self.get_model_data()[model] < limit:
-                    return model
+        if requested.startswith("gemini"):
+            provider_key = 'gemini'
+        elif requested.startswith("claude"):
+            provider_key = 'claude'
+        elif requested.startswith("openai") or requested.startswith("gpt") or requested.startswith("o1"):
+            provider_key = 'openai'
         else:
-            raise ValueError(f"Unknown model: {model_name}")
-        
-        # all model limits have been surpassed:
-        if model is None:
-            return ''
+            raise ValueError(f"Unknown model family: {model_name}")
+
+        provider_limits = limits.get(provider_key, {})
+        for candidate_model, limit in provider_limits.items():
+            if self._get_model_query_count(candidate_model) < int(limit):
+                return candidate_model
+
+        return ''
 
 
     async def get_tokens(self, chat_id: int) -> int:

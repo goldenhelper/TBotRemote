@@ -14,11 +14,13 @@ class LocalTestingConfig(BaseSettings):
     aws_region: str = 'eu-north-1'
     token_table_name: str = 'telegram-bot-tokens'
     chat_history_table: str = 'telegram-bot-chat-history'
+    model_usage_table_name: str = 'telegram-bot-model-usage'
     role_table_name: str = 'telegram-bot-roles'
     default_model: str = 'o3-2025-04-16'
     default_memory_updater_model: str = 'gemini-2.5-flash-preview-05-20'
     max_num_roles: int = 10
     max_role_name_length: int = 100
+    allowed_models_limits_param: str = '/telegram-bot/allowed_model_limits'
 
     def __init__(self):
         super().__init__()

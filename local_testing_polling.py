@@ -44,6 +44,8 @@ def main():
     # Initialize services
     model_manager = ModelManager(
         token_table_name=config.token_table_name,
+        model_usage_table_name=config.model_usage_table_name,
+        allowed_models_limits_resource_name=getattr(config, 'allowed_models_limits_param', '/telegram-bot/allowed_model_limits'),
         region=config.aws_region
     )
     

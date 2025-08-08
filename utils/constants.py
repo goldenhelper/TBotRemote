@@ -14,3 +14,18 @@ gemini_thinking_models = [
     "gemini-2.5-pro-preview-06-05",
     "gemini-2.5-flash-preview-05-20"
 ]
+
+# Default allowed models limits used as a fallback if SSM configuration is unavailable
+ALLOWED_MODELS_LIMITS = {
+    "gemini": {
+        "gemini-2.5-flash-preview-05-20": 500,
+        "gemini-2.5-pro-preview-06-05": 100,
+    },
+    "claude": {
+        "claude-4-opus-latest": 1000,
+        "claude-4-sonnet-latest": 1000,
+    },
+    "openai": {
+        "gpt-5-2025-08-07": 125,
+    },
+}
