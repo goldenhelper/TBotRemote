@@ -6,7 +6,7 @@ from telegram import Bot
 
 # === CONFIGURE THIS ===
 # Your Render URL (get this from the Render dashboard after deployment)
-RENDER_URL = "https://your-bot-name.onrender.com"  # Change this!
+RENDER_URL = "https://tbotremote.onrender.com"
 
 # Your bot token (or set as environment variable)
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
