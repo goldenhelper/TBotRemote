@@ -82,7 +82,7 @@ class MainHandler:
         cool_user_ids (List[int]): List of privileged user IDs
     """
 
-    def __init__(self, 
+    def __init__(self,
                  model_manager: ModelManager,
                  role_manager: RoleManager,
                  storage: Storage,
@@ -92,25 +92,27 @@ class MainHandler:
                  api_keys: dict,
                  aws_region: str,
                  max_num_roles: int,
-                 max_role_name_length: int
+                 max_role_name_length: int,
+                 video_analyzer_model: str = 'gemini-2.0-flash'
                  ):
         """Initialize the MainHandler with required services and configurations."""
         self.model_manager = model_manager
         self.storage = storage
         self.role_manager = role_manager
         self.admin_user_id = admin_user_id
-        self.ssm_client = boto3.client('ssm', region_name=aws_region)
+        self.ssm_client = boto3.client('ssm', region_name=aws_region) if aws_region else None
         self.api_keys = api_keys
         self.bot_id = bot_id
         self.formatting_info = formatting_info
         self.cool_user_ids = [self.admin_user_id, 476593109]
         self.max_num_roles = max_num_roles
         self.max_role_name_length = max_role_name_length
-        
+        self.video_analyzer_model = video_analyzer_model
+
         # Create a single GeminiService instance for all video/animation analysis
         self.video_analyzer = GeminiService(
             api_key=api_keys.get('gemini'),
-            model_name="gemini-2.0-flash",  # Stable, cost-effective model for vision tasks
+            model_name=video_analyzer_model,
             thinking_model=False,
         )
 
@@ -454,8 +456,8 @@ class MainHandler:
             service_cls   = PROVIDERS[provider_key]
 
             video_analyzer = GeminiService(
-                api_key=self.api_keys['gemini'], 
-                model_name="gemini-2.0-flash",  # Use stable model for video analysis
+                api_key=self.api_keys['gemini'],
+                model_name=self.video_analyzer_model,
                 thinking_model=False
             ) if provider_key != 'gemini' else None
             init_kwargs = {

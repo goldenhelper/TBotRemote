@@ -92,11 +92,11 @@ class ModelManager:
         requested = model_name.lower()
         limits = self._load_allowed_models_limits()
 
-        if requested.startswith("gemini"):
+        if requested in limits['gemini']:
             provider_key = 'gemini'
-        elif requested.startswith("claude"):
+        elif requested in limits['claude']:
             provider_key = 'claude'
-        elif requested.startswith("openai") or requested.startswith("gpt") or requested.startswith("o1"):
+        elif requested in limits['openai']:
             provider_key = 'openai'
         else:
             raise ValueError(f"Unknown model family: {model_name}")

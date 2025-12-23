@@ -41,7 +41,13 @@ def update_role(prompt, new_role):
 class Storage(ABC):
     """
     Base Storage class for handling chat history persistence.
-    Both FileStorage and AWSStorage should inherit from this class.
+
+    Implementations must provide a role_manager for role-related methods:
+    - get_current_role()
+    - get_available_roles()
+
+    Concrete implementations: FileStorage, SupabaseStorage
+    Deprecated: AWSStorage (incomplete interface)
     """
     @abstractmethod
     async def save_conversation(self, chat_id: int, tracker: "ConversationTracker"):
@@ -74,13 +80,38 @@ class Storage(ABC):
         pass
     
     @abstractmethod
-    async def get_current_role_id(self, *, chat_id: int):
-        """Get current role for the chat"""
+    async def get_current_role_id(self, *, chat_id: int) -> str:
+        """Get current role ID for the chat"""
         pass
 
     @abstractmethod
-    async def get_available_roles_ids(self, *, chat_id: int):
-        """Get available roles for the chat"""
+    async def get_current_role(self, *, chat_id: int):
+        """Get current role object for the chat (requires role_manager)"""
+        pass
+
+    @abstractmethod
+    async def set_current_role_id(self, role_id: str, *, chat_id: int):
+        """Set current role ID for the chat"""
+        pass
+
+    @abstractmethod
+    async def get_available_roles_ids(self, *, chat_id: int) -> list:
+        """Get available role IDs for the chat"""
+        pass
+
+    @abstractmethod
+    async def get_available_roles(self, *, chat_id: int) -> dict:
+        """Get available role objects for the chat (requires role_manager)"""
+        pass
+
+    @abstractmethod
+    async def add_available_role_id(self, role_id: str, *, chat_id: int):
+        """Add a role to the chat's available roles"""
+        pass
+
+    @abstractmethod
+    async def remove_available_role_id(self, role_id: str, *, chat_id: int):
+        """Remove a role from the chat's available roles"""
         pass
 
     @abstractmethod
