@@ -107,8 +107,6 @@ def main():
 
     # Load config
     config = SupabaseConfig()
-    print(f"Key length: {len(config.supabase_key)}")
-    print(f"Key starts with: {config.supabase_key[:20]}")
 
     # Initialize Supabase services
     model_manager = SupabaseModelManager(

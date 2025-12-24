@@ -70,10 +70,15 @@ class Storage(ABC):
         pass
     
     @abstractmethod
-    async def clear_chat_history(self, chat_id: int):
-        """Delete the chat history for the given chat ID"""
+    async def clear_messages(self, chat_id: int):
+        """Clear all messages for a chat but keep settings (tokens, model, etc.)"""
         pass
-    
+
+    @abstractmethod
+    async def delete_chat(self, chat_id: int):
+        """Delete the chat completely including all messages and settings"""
+        pass
+
     @abstractmethod
     async def initialize_chat(self, chat_id: int):
         """Initialize a new chat with default structure"""
@@ -314,9 +319,17 @@ class AWSStorage(Storage):
         else:
             logger.warning(f"Message {message_id} not found in chat {chat_id} for description update")
 
-    async def clear_chat_history(self, chat_id: int):
+    async def clear_messages(self, chat_id: int):
+        """Clear all messages but keep chat settings."""
+        tracker = await self.load_conversation(chat_id=chat_id)
+        tracker.messages = {}
+        await self.save_conversation(chat_id, tracker)
+        logger.info(f"Cleared messages for chat {chat_id}")
+
+    async def delete_chat(self, chat_id: int):
         """Delete the table item corresponding to the chat ID"""
         self.table.delete_item(Key={'chat_id': str(chat_id)})
+        logger.info(f"Deleted chat {chat_id}")
 
     async def initialize_chat(self, chat_id: int):
         """Initialize a new DynamoDB item with default structure."""
@@ -556,11 +569,19 @@ class FileStorage(Storage):
         else:
             logger.warning(f"Message {message_id} not found in chat {chat_id} for description update")
 
-    async def clear_chat_history(self, chat_id: int):
+    async def clear_messages(self, chat_id: int):
+        """Clear all messages but keep chat settings."""
+        tracker = await self.load_conversation(chat_id=chat_id)
+        tracker.messages = {}
+        await self.save_conversation(chat_id, tracker)
+        logger.info(f"Cleared messages for chat {chat_id}")
+
+    async def delete_chat(self, chat_id: int):
         """Delete the chat history file for the given chat ID"""
         file_path = self._get_file_path(chat_id)
         if os.path.exists(file_path):
             os.remove(file_path)
+        logger.info(f"Deleted chat {chat_id}")
 
     async def initialize_chat(self, chat_id: int):
         """Initialize a new chat file with default structure."""
