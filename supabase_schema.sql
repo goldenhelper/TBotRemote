@@ -96,6 +96,21 @@ INSERT INTO config (key, value) VALUES (
     '[]'::jsonb
 );
 
+-- Insert bot settings (can be changed via Telegram commands)
+INSERT INTO config (key, value) VALUES (
+    'bot_settings',
+    '{
+        "default_model": "gemini-2.0-flash",
+        "default_memory_updater_model": "gemini-2.0-flash",
+        "video_analyzer_model": "gemini-2.0-flash",
+        "default_role_id": null,
+        "default_come_to_life_chance": 0.1,
+        "default_tokens_for_new_chats": 15000,
+        "max_num_roles": 10,
+        "max_role_name_length": 100
+    }'::jsonb
+);
+
 -- Function to auto-update updated_at
 CREATE OR REPLACE FUNCTION update_updated_at()
 RETURNS TRIGGER AS $$

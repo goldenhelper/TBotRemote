@@ -36,7 +36,7 @@ user_commands = {
     "/clear_history" : "Очистить историю сообщений (токены и настройки сохраняются)",
     "/delete_chat" : "Полностью удалить чат (включая токены и настройки)",
     "/get_role" : "Показывает текущую роль.",
-    "/add_role" : "Добавляет новую личность боту! Инструкция: /add_role имя_личности. Затем бот спросит вас об описании",
+    "/add_role" : "Добавляет новую личность боту! Просто напиши /add_role и бот всё спросит сам.",
     "/choose_role": "Выбрать роль для бота."
 }
 
@@ -46,6 +46,8 @@ admin_commands = {
     "/add_admin" : "Добавить админа: /add_admin <user_id>",
     "/remove_admin" : "Удалить админа: /remove_admin <user_id>",
     "/list_admins" : "Показать список админов.",
+    "/get_settings" : "Показать все настройки бота.",
+    "/set_setting" : "Изменить настройку: /set_setting <key> <value>",
 }   
 
 DEBUG = True
@@ -95,9 +97,6 @@ class MainHandler:
                  formatting_info: str,
                  api_keys: dict,
                  aws_region: str,
-                 max_num_roles: int,
-                 max_role_name_length: int,
-                 video_analyzer_model: str = 'gemini-2.0-flash'
                  ):
         """Initialize the MainHandler with required services and configurations."""
         self.model_manager = model_manager
@@ -111,19 +110,42 @@ class MainHandler:
         # Ensure primary admin from config is in Supabase admin list
         if not self.storage.is_admin(self.admin_user_id):
             self.storage.add_admin_user(self.admin_user_id)
-        self.max_num_roles = max_num_roles
-        self.max_role_name_length = max_role_name_length
-        self.video_analyzer_model = video_analyzer_model
+        # Video analyzer and media handler are created lazily
+        self._video_analyzer = None
+        self._video_analyzer_model = None
+        self._media_handler = None
 
-        # Create a single GeminiService instance for all video/animation analysis
-        self.video_analyzer = GeminiService(
-            api_key=api_keys.get('gemini'),
-            model_name=video_analyzer_model,
-            thinking_model=False,
-        )
+    @property
+    def max_num_roles(self) -> int:
+        return self.storage.max_num_roles
 
-        # Initialize the media handler and reuse the shared analyser
-        self.media_handler = MediaHandler(storage, video_analyzer=self.video_analyzer)
+    @property
+    def max_role_name_length(self) -> int:
+        return self.storage.max_role_name_length
+
+    @property
+    def video_analyzer_model(self) -> str:
+        return self.storage.video_analyzer_model
+
+    @property
+    def video_analyzer(self) -> GeminiService:
+        """Lazily create video analyzer, recreating if model changed."""
+        current_model = self.video_analyzer_model
+        if self._video_analyzer is None or self._video_analyzer_model != current_model:
+            self._video_analyzer = GeminiService(
+                api_key=self.api_keys.get('gemini'),
+                model_name=current_model,
+                thinking_model=False,
+            )
+            self._video_analyzer_model = current_model
+        return self._video_analyzer
+
+    @property
+    def media_handler(self) -> MediaHandler:
+        """Lazily create media handler."""
+        if self._media_handler is None:
+            self._media_handler = MediaHandler(self.storage, video_analyzer=self.video_analyzer)
+        return self._media_handler
 
     def get_full_system_prompt(self) -> str:
         """
@@ -785,10 +807,41 @@ class MainHandler:
             return True 
 
 
+        # Step 1: User replied with role name
+        if reply_to_message and reply_to_message.from_user.id == self.bot_id and reply_to_message.text.startswith("NewRoleName:"):
+            role_name = text.strip()
+
+            # Validate name length
+            if len(role_name) > self.max_role_name_length:
+                await update.message.reply_text(f"Воу, воу, воу. Что это за длинющее имя такое. Пж не больше {self.max_role_name_length} символов.")
+                return True
+
+            # Check for duplicates
+            global_roles = (await self.role_manager.get_global_roles()).values()
+            chat_specific_roles = (await self.storage.get_available_roles(chat_id=update.message.chat_id)).values()
+            global_roles_names = {role.name for role in global_roles}
+            chat_specific_roles_names = {role.name for role in chat_specific_roles}
+
+            if role_name in global_roles_names or role_name in chat_specific_roles_names:
+                await update.message.reply_text(f"Сори, но такая личность уже есть. Пожалуйста, выбери другое имя.")
+                return True
+
+            # Edit the prompt message to remove the prefix
+            await reply_to_message.edit_text("Как назовём новую личность?")
+
+            # Ask for description
+            num_current_roles = len(await self.storage.get_available_roles_ids(chat_id=update.message.chat_id))
+            await context.bot.send_message(
+                chat_id=update.message.chat_id,
+                text=f"NewRoleAddition:{role_name}\nОтлично! Теперь опиши личность {role_name} (ответь на это сообщение описанием).\n\nP.s уже добавлено {num_current_roles}/{self.max_num_roles} личностей."
+            )
+            return True
+
+        # Step 2: User replied with role description
         if reply_to_message and reply_to_message.from_user.id == self.bot_id and reply_to_message.text.startswith("NewRoleAddition:"):
-            #edit message after it has been replied to, and remove the NewRoleAddition prefix
+            # Edit message after it has been replied to, and remove the NewRoleAddition prefix
             await reply_to_message.edit_text(reply_to_message.text.split('\n', maxsplit=1)[1])
-            
+
             _, role_name = reply_to_message.text.split("\n")[0].split(":")
             # the role is checked at first, before being added
             if await self.role_approved_by_bot(text):
@@ -797,7 +850,7 @@ class MainHandler:
             else:
                 await update.message.reply_text(f"Шото подозрительное. Спрошу у Мишки можно ли мне такую личность.")
                 await self.send_message_to_admin(f"NewRoleApprovalRequest:{update.effective_chat.id}:{update.message.message_id}:{user.id}\nName: {role_name}\nThe prompt:\n{text}", context.bot)
-                
+
             return True
         
         return False
@@ -1018,18 +1071,27 @@ class MainHandler:
         await update.message.reply_text(notes)
 
 
-    # NOTE: there's a bug that if one responds multiple times to the message, multiple roles will be added
     @command_for_admin
     async def add_role_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Add a role to choose"""
-        try: 
-            
+        """Add a role. Supports both interactive flow (/add_role) and direct (/add_role name)."""
+        try:
             num_current_roles = len(await self.storage.get_available_roles_ids(chat_id=update.message.chat_id))
             if num_current_roles >= self.max_num_roles:
-                await update.message.reply_text(f"Сори, у ботика уже слишком много личностей. Максимум {self.max_num_roles}. Если хочешь новую, то удали роль с помощью /delete_role.")
+                await update.message.reply_text(f"Сори, у ботика уже слишком много личностей. Максимум {self.max_num_roles}. Если хочешь новую, то удали роль с помощью /remove_role.")
                 return
 
-            name = update.message.text.split(" ", 1)[1]
+            parts = update.message.text.split(" ", 1)
+
+            # Interactive flow: just /add_role
+            if len(parts) == 1:
+                await context.bot.send_message(
+                    chat_id=update.message.chat_id,
+                    text=f"NewRoleName:\nКак назовём новую личность? (ответь на это сообщение)"
+                )
+                return
+
+            # Direct flow: /add_role name
+            name = parts[1].strip()
 
             if len(name) > self.max_role_name_length:
                 await update.message.reply_text(f"Воу, воу, воу. Что это за длинющее имя такое. Пж не больше {self.max_role_name_length} символов.")
@@ -1041,12 +1103,13 @@ class MainHandler:
             chat_specific_roles_names = {role.name for role in chat_specific_roles}
 
             if name in global_roles_names or name in chat_specific_roles_names:
-                await update.message.reply_text(f"Сори, но такая личность уже есть. Пожалуйста, выберите другое имя.")
+                await update.message.reply_text(f"Сори, но такая личность уже есть. Пожалуйста, выбери другое имя.")
                 return
 
-            await context.bot.send_message(chat_id=update.message.chat_id, text=f"NewRoleAddition:{name}\nЧто же за личность {name} (ответь на это сообщение описанием)?\n\nP.s уже было добавлено {num_current_roles}/{self.max_num_roles} личностей.")
-        except IndexError :
-            await update.message.reply_text(f"Напиши пж \"/add_role имя_роли\"")
+            await context.bot.send_message(
+                chat_id=update.message.chat_id,
+                text=f"NewRoleAddition:{name}\nОпиши личность {name} (ответь на это сообщение описанием).\n\nP.s уже добавлено {num_current_roles}/{self.max_num_roles} личностей."
+            )
         except Exception as e:
             await self.send_error_message(update, context, f"Error: {e}")
 
@@ -1246,6 +1309,56 @@ class MainHandler:
             await update.message.reply_text(f"Admin users:\n{admin_list}")
         else:
             await update.message.reply_text("No admins configured.")
+
+    @command_for_admin
+    async def get_settings_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show all bot settings."""
+        settings = self.storage.get_bot_settings()
+        lines = ["Bot Settings:"]
+        for key, value in settings.items():
+            lines.append(f"• {key}: {value}")
+        await update.message.reply_text("\n".join(lines))
+
+    @command_for_admin
+    async def set_setting_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Set a bot setting. Usage: /set_setting <key> <value>"""
+        try:
+            args = update.message.text.split(maxsplit=2)
+            if len(args) < 3:
+                settings = self.storage.get_bot_settings()
+                keys = ", ".join(settings.keys())
+                await update.message.reply_text(f"Usage: /set_setting <key> <value>\n\nAvailable keys: {keys}")
+                return
+
+            key = args[1]
+            value_str = args[2]
+
+            # Validate key exists
+            settings = self.storage.get_bot_settings()
+            if key not in settings:
+                await update.message.reply_text(f"Unknown setting: {key}\n\nAvailable: {', '.join(settings.keys())}")
+                return
+
+            # Convert value to appropriate type
+            current_value = settings[key]
+            if isinstance(current_value, bool):
+                value = value_str.lower() in ('true', 'yes', '1', 'on')
+            elif isinstance(current_value, int):
+                value = int(value_str)
+            elif isinstance(current_value, float):
+                value = float(value_str)
+            elif current_value is None:
+                # For None values (like default_role_id), keep as string or None
+                value = None if value_str.lower() in ('none', 'null', '') else value_str
+            else:
+                value = value_str
+
+            if self.storage.set_bot_setting(key, value):
+                await update.message.reply_text(f"Setting updated: {key} = {value}")
+            else:
+                await update.message.reply_text(f"Failed to update setting: {key}")
+        except ValueError as e:
+            await update.message.reply_text(f"Invalid value: {e}")
 
 
 PROVIDERS = {

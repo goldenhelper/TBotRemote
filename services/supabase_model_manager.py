@@ -20,16 +20,39 @@ class SupabaseModelManager:
     Replaces the DynamoDB-based ModelManager.
     """
 
-    def __init__(self, supabase_url: str, supabase_key: str,
-                 default_model: str = 'gemini-2.0-flash',
-                 default_role_id: str = None,
-                 default_memory_updater_model: str = None,
-                 default_tokens_for_new_chats: int = 6000):
+    def __init__(self, supabase_url: str, supabase_key: str):
         self.client: Client = create_client(supabase_url, supabase_key)
-        self.default_model = default_model
-        self.default_role_id = default_role_id
-        self.default_memory_updater_model = default_memory_updater_model or default_model
-        self.default_tokens_for_new_chats = default_tokens_for_new_chats
+
+    def _get_bot_setting(self, key: str):
+        """Get a specific bot setting from config table. Raises error if not accessible."""
+        result = self.client.table('config')\
+            .select('value')\
+            .eq('key', 'bot_settings')\
+            .execute()
+
+        if not result.data:
+            raise RuntimeError("Bot settings not found in Supabase. Please initialize the 'bot_settings' config entry.")
+
+        settings = result.data[0]['value']
+        if key not in settings:
+            raise KeyError(f"Bot setting '{key}' not found in Supabase config.")
+        return settings[key]
+
+    @property
+    def default_model(self) -> str:
+        return self._get_bot_setting('default_model')
+
+    @property
+    def default_role_id(self):
+        return self._get_bot_setting('default_role_id')
+
+    @property
+    def default_memory_updater_model(self) -> str:
+        return self._get_bot_setting('default_memory_updater_model')
+
+    @property
+    def default_tokens_for_new_chats(self) -> int:
+        return self._get_bot_setting('default_tokens_for_new_chats')
 
     def _load_allowed_models_limits(self) -> dict:
         """Load allowed models limits from config table with fallback to local constants."""

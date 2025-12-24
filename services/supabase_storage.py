@@ -26,20 +26,43 @@ class SupabaseStorage(Storage):
         self,
         supabase_url: str,
         supabase_key: str,
-        default_model: str,
-        default_role_id: str,
         role_manager=None,
-        default_memory_updater_model: Optional[str] = None,
-        default_come_to_life_chance: float = DEFAULT_COME_TO_LIFE_CHANCE,
-        default_tokens_for_new_chats: int = 0,
     ):
         self.client: Client = create_client(supabase_url, supabase_key)
-        self.default_model = default_model
-        self.default_role_id = default_role_id
-        self.default_memory_updater_model = default_memory_updater_model or default_model
-        self.default_come_to_life_chance = default_come_to_life_chance
-        self.default_tokens_for_new_chats = default_tokens_for_new_chats
         self.role_manager = role_manager
+        # Settings are loaded dynamically from Supabase via get_bot_setting()
+
+    @property
+    def default_model(self) -> str:
+        return self.get_bot_setting('default_model')
+
+    @property
+    def default_role_id(self) -> Optional[str]:
+        return self.get_bot_setting('default_role_id')
+
+    @property
+    def default_memory_updater_model(self) -> str:
+        return self.get_bot_setting('default_memory_updater_model')
+
+    @property
+    def default_come_to_life_chance(self) -> float:
+        return self.get_bot_setting('default_come_to_life_chance')
+
+    @property
+    def default_tokens_for_new_chats(self) -> int:
+        return self.get_bot_setting('default_tokens_for_new_chats')
+
+    @property
+    def max_num_roles(self) -> int:
+        return self.get_bot_setting('max_num_roles')
+
+    @property
+    def max_role_name_length(self) -> int:
+        return self.get_bot_setting('max_role_name_length')
+
+    @property
+    def video_analyzer_model(self) -> str:
+        return self.get_bot_setting('video_analyzer_model')
 
     async def initialize_chat(self, chat_id: int):
         """Initialize a new chat with default structure."""
@@ -202,7 +225,7 @@ class SupabaseStorage(Storage):
         """Clear all messages for a chat but keep the chat entry (tokens, settings, etc.)."""
         self.client.table('messages').delete().eq('chat_id', chat_id).execute()
         # Also clear notes since they're derived from message history
-        self.client.table('chats').update({'notes': ''}).eq('chat_id', chat_id).execute()
+        self.client.table('chats').update({'notes_text': '', 'notes_last_updated_msgs_ago': 0}).eq('chat_id', chat_id).execute()
         logger.info(f"Cleared messages and notes for chat {chat_id}")
 
     async def delete_chat(self, chat_id: int):
@@ -416,19 +439,16 @@ class SupabaseStorage(Storage):
     # ==================== Admin Management ====================
 
     def get_admin_user_ids(self) -> List[int]:
-        """Get list of admin user IDs from config table."""
-        try:
-            result = self.client.table('config')\
-                .select('value')\
-                .eq('key', 'admin_user_ids')\
-                .execute()
+        """Get list of admin user IDs from config table. Raises error if Supabase not accessible."""
+        result = self.client.table('config')\
+            .select('value')\
+            .eq('key', 'admin_user_ids')\
+            .execute()
 
-            if result.data:
-                return [int(uid) for uid in result.data[0]['value']]
-            return []
-        except Exception as e:
-            logger.error(f"Error getting admin user IDs: {e}")
-            return []
+        if result.data:
+            return [int(uid) for uid in result.data[0]['value']]
+        # Entry not found is OK - return empty list (primary admin will be added on startup)
+        return []
 
     def add_admin_user(self, user_id: int) -> bool:
         """Add a user ID to the admin list."""
@@ -467,3 +487,52 @@ class SupabaseStorage(Storage):
     def is_admin(self, user_id: int) -> bool:
         """Check if a user ID is in the admin list."""
         return user_id in self.get_admin_user_ids()
+
+    # ==================== Bot Settings ====================
+
+    def get_bot_settings(self) -> dict:
+        """Get all bot settings from config table. Raises error if not accessible."""
+        result = self.client.table('config')\
+            .select('value')\
+            .eq('key', 'bot_settings')\
+            .execute()
+
+        if not result.data:
+            raise RuntimeError("Bot settings not found in Supabase. Please initialize the 'bot_settings' config entry.")
+
+        return result.data[0]['value']
+
+    def get_bot_setting(self, key: str):
+        """Get a specific bot setting. Raises error if not accessible."""
+        settings = self.get_bot_settings()
+        if key not in settings:
+            raise KeyError(f"Bot setting '{key}' not found in Supabase config.")
+        return settings[key]
+
+    def set_bot_setting(self, key: str, value) -> bool:
+        """Set a specific bot setting."""
+        try:
+            settings = self.get_bot_settings()
+            settings[key] = value
+            self.client.table('config')\
+                .upsert({'key': 'bot_settings', 'value': settings})\
+                .execute()
+            logger.info(f"Updated bot setting {key} = {value}")
+            return True
+        except Exception as e:
+            logger.error(f"Error setting bot setting {key}: {e}")
+            return False
+
+    def set_bot_settings(self, settings: dict) -> bool:
+        """Set multiple bot settings at once."""
+        try:
+            current = self.get_bot_settings()
+            current.update(settings)
+            self.client.table('config')\
+                .upsert({'key': 'bot_settings', 'value': current})\
+                .execute()
+            logger.info(f"Updated bot settings: {settings}")
+            return True
+        except Exception as e:
+            logger.error(f"Error setting bot settings: {e}")
+            return False

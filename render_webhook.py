@@ -56,36 +56,26 @@ def create_application():
 
     config = SupabaseConfig()
 
-    # Initialize Supabase services
+    # Initialize Supabase services (settings are loaded from Supabase config table)
     model_manager = SupabaseModelManager(
         supabase_url=config.supabase_url,
         supabase_key=config.supabase_key,
-        default_model=config.default_model,
-        default_role_id=config.default_role_id,
-        default_memory_updater_model=config.default_memory_updater_model,
-        default_tokens_for_new_chats=config.default_tokens_for_new_chats,
     )
 
     role_manager = SupabaseRoleManager(
         supabase_url=config.supabase_url,
         supabase_key=config.supabase_key,
-        default_role_id=config.default_role_id,
     )
 
     storage = SupabaseStorage(
         supabase_url=config.supabase_url,
         supabase_key=config.supabase_key,
-        default_model=config.default_model,
-        default_role_id=config.default_role_id,
         role_manager=role_manager,
-        default_memory_updater_model=config.default_memory_updater_model,
-        default_come_to_life_chance=config.default_come_to_life_chance,
-        default_tokens_for_new_chats=config.default_tokens_for_new_chats,
     )
 
     bot_id = config.bot_token.split(':')[0]
 
-    # Initialize message handler
+    # Initialize message handler (settings like max_num_roles are loaded from Supabase)
     message_handler = MainHandler(
         model_manager=model_manager,
         storage=storage,
@@ -99,9 +89,6 @@ def create_application():
         formatting_info=DEFAULT_FORMATTING_INFO,
         bot_id=int(bot_id),
         aws_region='',  # Not used with Supabase
-        max_num_roles=config.max_num_roles,
-        max_role_name_length=config.max_role_name_length,
-        video_analyzer_model=config.video_analyzer_model,
     )
 
     # Build application
@@ -128,6 +115,8 @@ def create_application():
     telegram_app.add_handler(CommandHandler("add_admin", message_handler.add_admin_command))
     telegram_app.add_handler(CommandHandler("remove_admin", message_handler.remove_admin_command))
     telegram_app.add_handler(CommandHandler("list_admins", message_handler.list_admins_command))
+    telegram_app.add_handler(CommandHandler("get_settings", message_handler.get_settings_command))
+    telegram_app.add_handler(CommandHandler("set_setting", message_handler.set_setting_command))
 
     # Callback query handlers
     telegram_app.add_handler(CallbackQueryHandler(

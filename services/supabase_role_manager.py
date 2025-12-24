@@ -19,11 +19,25 @@ class SupabaseRoleManager:
     Replaces the DynamoDB-based RoleManager.
     """
 
-    def __init__(self, supabase_url: str, supabase_key: str, default_role_id: str):
+    def __init__(self, supabase_url: str, supabase_key: str):
         self.client: Client = create_client(supabase_url, supabase_key)
-        self.default_role_id = default_role_id
         self.global_roles_cache: Optional[Dict[str, Role]] = None
         self.global_roles_ttl: float = 0
+
+    @property
+    def default_role_id(self) -> Optional[str]:
+        """Get default role ID from bot settings."""
+        try:
+            result = self.client.table('config')\
+                .select('value')\
+                .eq('key', 'bot_settings')\
+                .execute()
+
+            if result.data:
+                return result.data[0]['value'].get('default_role_id')
+            return None
+        except Exception:
+            return None
 
     async def get_global_roles(self) -> Dict[str, Role]:
         """

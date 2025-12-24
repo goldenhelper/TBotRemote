@@ -108,7 +108,7 @@ def main():
     # Load config
     config = SupabaseConfig()
 
-    # Initialize Supabase services
+    # Initialize Supabase services (settings are loaded from Supabase config table)
     model_manager = SupabaseModelManager(
         supabase_url=config.supabase_url,
         supabase_key=config.supabase_key,
@@ -117,17 +117,12 @@ def main():
     role_manager = SupabaseRoleManager(
         supabase_url=config.supabase_url,
         supabase_key=config.supabase_key,
-        default_role_id=config.default_role_id,
     )
 
     storage = SupabaseStorage(
         supabase_url=config.supabase_url,
         supabase_key=config.supabase_key,
-        default_model=config.default_model,
-        default_role_id=config.default_role_id,
         role_manager=role_manager,
-        default_memory_updater_model=config.default_memory_updater_model,
-        default_come_to_life_chance=config.default_come_to_life_chance,
     )
 
     # You can load formatting_info from Supabase config table if needed:
@@ -137,7 +132,7 @@ def main():
 
     bot_id = config.bot_token.split(':')[0]
 
-    # Initialize message handler
+    # Initialize message handler (settings like max_num_roles are loaded from Supabase)
     message_handler = MainHandler(
         model_manager=model_manager,
         storage=storage,
@@ -151,8 +146,6 @@ def main():
         formatting_info=formatting_info,
         bot_id=int(bot_id),
         aws_region='',  # Not used with Supabase
-        max_num_roles=config.max_num_roles,
-        max_role_name_length=config.max_role_name_length,
     )
 
     application = ApplicationBuilder().token(config.bot_token).build()
@@ -179,6 +172,8 @@ def main():
     application.add_handler(CommandHandler("add_admin", message_handler.add_admin_command))
     application.add_handler(CommandHandler("remove_admin", message_handler.remove_admin_command))
     application.add_handler(CommandHandler("list_admins", message_handler.list_admins_command))
+    application.add_handler(CommandHandler("get_settings", message_handler.get_settings_command))
+    application.add_handler(CommandHandler("set_setting", message_handler.set_setting_command))
 
     # Callback query handlers
     application.add_handler(CallbackQueryHandler(
@@ -192,9 +187,6 @@ def main():
     ))
 
     application.add_handler(MessageHandler(~filters.COMMAND, message_handler.handle_message))
-
-    print("Bot starting with Supabase backend...")
-    print(f"Supabase URL: {config.supabase_url}")
 
     # Run the bot
     application.run_polling(allowed_updates=Update.ALL_TYPES)
