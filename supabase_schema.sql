@@ -90,6 +90,12 @@ INSERT INTO config (key, value) VALUES (
     }'::jsonb
 );
 
+-- Insert admin user IDs (replace with your actual admin user IDs)
+INSERT INTO config (key, value) VALUES (
+    'admin_user_ids',
+    '[]'::jsonb
+);
+
 -- Function to auto-update updated_at
 CREATE OR REPLACE FUNCTION update_updated_at()
 RETURNS TRIGGER AS $$

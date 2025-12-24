@@ -41,8 +41,11 @@ user_commands = {
 }
 
 admin_commands = {
-    "/get_model_data" : "Показывает текущую модельку.", 
+    "/get_model_data" : "Показывает текущую модельку.",
     "/give_bot_tokens" : "Дает боту токены.",
+    "/add_admin" : "Добавить админа: /add_admin <user_id>",
+    "/remove_admin" : "Удалить админа: /remove_admin <user_id>",
+    "/list_admins" : "Показать список админов.",
 }   
 
 DEBUG = True
@@ -105,7 +108,9 @@ class MainHandler:
         self.api_keys = api_keys
         self.bot_id = bot_id
         self.formatting_info = formatting_info
-        self.cool_user_ids = [self.admin_user_id, 476593109]
+        # Ensure primary admin from config is in Supabase admin list
+        if not self.storage.is_admin(self.admin_user_id):
+            self.storage.add_admin_user(self.admin_user_id)
         self.max_num_roles = max_num_roles
         self.max_role_name_length = max_role_name_length
         self.video_analyzer_model = video_analyzer_model
@@ -432,7 +437,7 @@ class MainHandler:
             await self.storage.add_message(chat_id, current_node)
 
             # Handle admin responses
-            if (chat_id == self.admin_user_id or update.message.from_user.id in self.cool_user_ids) and update.message.reply_to_message:
+            if self.storage.is_admin(update.message.from_user.id) and update.message.reply_to_message:
                 if await self.handle_admin_response(update, context):
                     return
 
@@ -858,7 +863,7 @@ class MainHandler:
 
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Send a message when the command /help is issued."""
-        is_admin = update.message.from_user.id == self.admin_user_id
+        is_admin = self.storage.is_admin(update.message.from_user.id)
 
         help_text = [
             f"{HELP_COMMAND_TEXT}",
@@ -894,7 +899,7 @@ class MainHandler:
     @staticmethod
     def command_for_admin(func):
         async def wrapper(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-            if update.message.from_user.id == self.admin_user_id or update.message.from_user.id in self.cool_user_ids:
+            if self.storage.is_admin(update.message.from_user.id):
                 return await func(self, update, context)
             else:
                 await update.message.reply_text("Сори, братишка, но ты здесь не босс.")
@@ -1191,6 +1196,57 @@ class MainHandler:
             await update.message.reply_text(f"Теперь ботик жив на все {percent} процентов")
         except (ValueError, IndexError):
             await update.message.reply_text("Пожалуйста, укажите число от 0 до 100.")
+
+
+    @command_for_admin
+    async def add_admin_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Add a user as admin. Usage: /add_admin <user_id>"""
+        try:
+            args = update.message.text.split()
+            if len(args) != 2:
+                await update.message.reply_text("Usage: /add_admin <user_id>")
+                return
+
+            user_id = int(args[1])
+            if self.storage.add_admin_user(user_id):
+                await update.message.reply_text(f"User {user_id} added as admin.")
+            else:
+                await update.message.reply_text(f"User {user_id} is already an admin.")
+        except ValueError:
+            await update.message.reply_text("Invalid user ID. Please provide a numeric ID.")
+
+    @command_for_admin
+    async def remove_admin_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Remove a user from admins. Usage: /remove_admin <user_id>"""
+        try:
+            args = update.message.text.split()
+            if len(args) != 2:
+                await update.message.reply_text("Usage: /remove_admin <user_id>")
+                return
+
+            user_id = int(args[1])
+            # Prevent removing the primary admin from config
+            if user_id == self.admin_user_id:
+                await update.message.reply_text("Cannot remove the primary admin.")
+                return
+
+            if self.storage.remove_admin_user(user_id):
+                await update.message.reply_text(f"User {user_id} removed from admins.")
+            else:
+                await update.message.reply_text(f"User {user_id} is not an admin.")
+        except ValueError:
+            await update.message.reply_text("Invalid user ID. Please provide a numeric ID.")
+
+    @command_for_admin
+    async def list_admins_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """List all admin users."""
+        admin_ids = self.storage.get_admin_user_ids()
+        if admin_ids:
+            admin_list = "\n".join([f"• {uid}" for uid in admin_ids])
+            await update.message.reply_text(f"Admin users:\n{admin_list}")
+        else:
+            await update.message.reply_text("No admins configured.")
+
 
 PROVIDERS = {
     'claude': ClaudeService,

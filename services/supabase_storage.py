@@ -412,3 +412,58 @@ class SupabaseStorage(Storage):
             .execute()
 
         return update_notes
+
+    # ==================== Admin Management ====================
+
+    def get_admin_user_ids(self) -> List[int]:
+        """Get list of admin user IDs from config table."""
+        try:
+            result = self.client.table('config')\
+                .select('value')\
+                .eq('key', 'admin_user_ids')\
+                .execute()
+
+            if result.data:
+                return [int(uid) for uid in result.data[0]['value']]
+            return []
+        except Exception as e:
+            logger.error(f"Error getting admin user IDs: {e}")
+            return []
+
+    def add_admin_user(self, user_id: int) -> bool:
+        """Add a user ID to the admin list."""
+        try:
+            current_admins = self.get_admin_user_ids()
+            if user_id in current_admins:
+                return False  # Already an admin
+
+            current_admins.append(user_id)
+            self.client.table('config')\
+                .upsert({'key': 'admin_user_ids', 'value': current_admins})\
+                .execute()
+            logger.info(f"Added user {user_id} to admin list")
+            return True
+        except Exception as e:
+            logger.error(f"Error adding admin user {user_id}: {e}")
+            return False
+
+    def remove_admin_user(self, user_id: int) -> bool:
+        """Remove a user ID from the admin list."""
+        try:
+            current_admins = self.get_admin_user_ids()
+            if user_id not in current_admins:
+                return False  # Not an admin
+
+            current_admins.remove(user_id)
+            self.client.table('config')\
+                .upsert({'key': 'admin_user_ids', 'value': current_admins})\
+                .execute()
+            logger.info(f"Removed user {user_id} from admin list")
+            return True
+        except Exception as e:
+            logger.error(f"Error removing admin user {user_id}: {e}")
+            return False
+
+    def is_admin(self, user_id: int) -> bool:
+        """Check if a user ID is in the admin list."""
+        return user_id in self.get_admin_user_ids()

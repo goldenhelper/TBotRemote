@@ -125,6 +125,9 @@ def create_application():
     telegram_app.add_handler(CommandHandler("set_aliveness", message_handler.set_come_to_life_chance_command))
     telegram_app.add_handler(CommandHandler("how_alive", message_handler.get_come_to_life_chance_command))
     telegram_app.add_handler(CommandHandler("reset_model_data", message_handler.reset_model_data_command))
+    telegram_app.add_handler(CommandHandler("add_admin", message_handler.add_admin_command))
+    telegram_app.add_handler(CommandHandler("remove_admin", message_handler.remove_admin_command))
+    telegram_app.add_handler(CommandHandler("list_admins", message_handler.list_admins_command))
 
     # Callback query handlers
     telegram_app.add_handler(CallbackQueryHandler(
