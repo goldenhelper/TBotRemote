@@ -372,10 +372,13 @@ class MainHandler:
         If the bot comes to life, it will answer the user's message.
         """
         log("Bot ID:", self.bot_id)
-        
+
         try:
+            # Ensure bot's chat exists before attempting to use tokens
+            await self.model_manager.add_chat_if_not_exists(self.bot_id)
+
             balance = await self.model_manager.get_tokens(self.bot_id)
-            if balance == 0:
+            if balance is None or balance == 0:
                 return
 
             if random() < self.come_to_life_chance:
@@ -669,7 +672,7 @@ class MainHandler:
 
 
     async def deduct_tokens(self, user_id: int, input_tokens: int, output_tokens: int, output_tokens_multiplier: int) -> None:
-        await self.model_manager.use_tokens(str(user_id), input_tokens + output_tokens_multiplier * output_tokens)
+        await self.model_manager.use_tokens(user_id, input_tokens + output_tokens_multiplier * output_tokens)
 
     #TODO: implement this
     async def role_approved_by_bot(self, role_name: str) -> bool:

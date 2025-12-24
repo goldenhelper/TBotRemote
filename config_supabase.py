@@ -31,7 +31,7 @@ class SupabaseConfig(BaseSettings):
     # Limits
     max_num_roles: int = 10
     max_role_name_length: int = 100
-    default_tokens_for_new_chats: int = 6000
+    default_tokens_for_new_chats: int = 15000
 
     def __init__(self):
         super().__init__()
