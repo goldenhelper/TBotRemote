@@ -33,7 +33,8 @@ user_commands = {
     "/ask_for_tokens": "Поныть на токены и, может, Мишка зарядит ботика.",
     "/set_aliveness" : "Устанавливает активность ботика.",
     "/how_alive" : "Показывает насколько ботик живой.",
-    "/clear_history" : "Чистка истории (но не совести))",
+    "/clear_history" : "Очистить историю сообщений (токены и настройки сохраняются)",
+    "/delete_chat" : "Полностью удалить чат (включая токены и настройки)",
     "/get_role" : "Показывает текущую роль.",
     "/add_role" : "Добавляет новую личность боту! Инструкция: /add_role имя_личности. Затем бот спросит вас об описании",
     "/choose_role": "Выбрать роль для бота."
@@ -1054,10 +1055,16 @@ class MainHandler:
 
 
     @command_in_identified_chats
-    async def clear_chat_history_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Clear the chat history"""
-        await self.storage.clear_chat_history(update.message.chat_id)
-        await update.message.reply_text("Ваша история почищена (но не ваша совесть))")
+    async def clear_history_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Clear message history but keep tokens and settings"""
+        await self.storage.clear_messages(update.message.chat_id)
+        await update.message.reply_text("История сообщений очищена. Токены и настройки сохранены.")
+
+    @command_in_identified_chats
+    async def delete_chat_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Delete the chat completely (history, tokens, settings)"""
+        await self.storage.delete_chat(update.message.chat_id)
+        await update.message.reply_text("Чат полностью удалён. При следующем сообщении будет создан новый чат с начальными токенами.")
 
 
     @command_in_identified_chats

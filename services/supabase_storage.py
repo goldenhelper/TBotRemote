@@ -198,12 +198,20 @@ class SupabaseStorage(Storage):
             .execute()
         logger.info(f"Updated message {message_id} description in Supabase")
 
-    async def clear_chat_history(self, chat_id: int):
-        """Delete the chat and all its messages."""
+    async def clear_messages(self, chat_id: int):
+        """Clear all messages for a chat but keep the chat entry (tokens, settings, etc.)."""
+        self.client.table('messages').delete().eq('chat_id', chat_id).execute()
+        # Also clear notes since they're derived from message history
+        self.client.table('chats').update({'notes': ''}).eq('chat_id', chat_id).execute()
+        logger.info(f"Cleared messages and notes for chat {chat_id}")
+
+    async def delete_chat(self, chat_id: int):
+        """Delete the chat and all its messages, roles, tokens, and settings."""
         # Messages are deleted via CASCADE, but let's be explicit
         self.client.table('messages').delete().eq('chat_id', chat_id).execute()
         self.client.table('chat_roles').delete().eq('chat_id', chat_id).execute()
         self.client.table('chats').delete().eq('chat_id', chat_id).execute()
+        logger.info(f"Deleted chat {chat_id} and all associated data")
 
     @initialize_if_not_exists
     async def get_current_role_id(self, *, chat_id: int) -> str:
