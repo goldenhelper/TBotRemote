@@ -704,17 +704,14 @@ reply_to: <message_id>
     def set_model(self, chat_id: int, model_name: str):
         """
         Set the AI model for a specific chat.
-        
+
         Args:
             chat_id (int): Telegram chat ID
-            model_name (str): Name of the AI model to use
-            
+            model_name (str): Name of the AI model to use (should already be validated)
+
         Raises:
             ValueError: If the model name is not recognized
         """
-        # Get the best allowed model based on current limits
-        model_name = self.model_manager.best_allowed_model(model_name)
-
         # Store the model selection for this chat
         self.storage.set_model(chat_id=chat_id, model_name=model_name)
 
@@ -819,7 +816,11 @@ reply_to: <message_id>
 
     
         if limits[model_lineika][model] is not None and usage.get(model, 0) >= limits[model_lineika][model]:
-            self.set_model(update.effective_chat.id, model)
+            new_model = self.model_manager.best_allowed_model(model)
+            if not new_model:
+                await update.message.reply_text(f"Все модельки этой линейки устали. Попробуйте позже или выберите другую линейку моделей.")
+                return
+            self.set_model(update.effective_chat.id, new_model)
             await update.message.reply_text(f"Сори, бро, моделька устала. Моделька сменилась на лучшую доступную модельку этой линейки.")
 
 
