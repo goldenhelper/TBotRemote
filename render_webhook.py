@@ -8,9 +8,10 @@ import asyncio
 import logging
 from flask import Flask, request, jsonify
 from telegram import Update, Bot
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler
+from telegram.ext import Application
 
 from config_supabase import SupabaseConfig
+from handlers.register_handlers import register_handlers
 from handlers.message_handler import MainHandler
 from services.supabase_storage import SupabaseStorage
 from services.supabase_model_manager import SupabaseModelManager
@@ -89,47 +90,14 @@ def create_application():
         formatting_info=DEFAULT_FORMATTING_INFO,
         bot_id=int(bot_id),
         aws_region='',  # Not used with Supabase
+        alertobot_token=config.alertobot_token,
     )
 
     # Build application
     telegram_app = Application.builder().token(config.bot_token).build()
 
-    # Register handlers
-    telegram_app.add_handler(CommandHandler("start", message_handler.start_command))
-    telegram_app.add_handler(CommandHandler("help", message_handler.help_command))
-    telegram_app.add_handler(CommandHandler("tokens_amount", message_handler.get_tokens_command))
-    telegram_app.add_handler(CommandHandler("ask_for_tokens", message_handler.ask_for_tokens_command))
-    telegram_app.add_handler(CommandHandler("choose_model", message_handler.choose_model_command))
-    telegram_app.add_handler(CommandHandler("get_model_data", message_handler.get_model_data_command))
-    telegram_app.add_handler(CommandHandler("get_role", message_handler.get_role_command))
-    telegram_app.add_handler(CommandHandler("choose_role", message_handler.choose_role_command))
-    telegram_app.add_handler(CommandHandler("add_role", message_handler.add_role_command))
-    telegram_app.add_handler(CommandHandler("remove_role", message_handler.remove_role_command))
-    telegram_app.add_handler(CommandHandler("give_bot_tokens", message_handler.give_bot_tokens_command))
-    telegram_app.add_handler(CommandHandler("clear_history", message_handler.clear_history_command))
-    telegram_app.add_handler(CommandHandler("delete_chat", message_handler.delete_chat_command))
-    telegram_app.add_handler(CommandHandler("get_notes", message_handler.get_notes_command))
-    telegram_app.add_handler(CommandHandler("set_aliveness", message_handler.set_come_to_life_chance_command))
-    telegram_app.add_handler(CommandHandler("how_alive", message_handler.get_come_to_life_chance_command))
-    telegram_app.add_handler(CommandHandler("reset_model_data", message_handler.reset_model_data_command))
-    telegram_app.add_handler(CommandHandler("add_admin", message_handler.add_admin_command))
-    telegram_app.add_handler(CommandHandler("remove_admin", message_handler.remove_admin_command))
-    telegram_app.add_handler(CommandHandler("list_admins", message_handler.list_admins_command))
-    telegram_app.add_handler(CommandHandler("get_settings", message_handler.get_settings_command))
-    telegram_app.add_handler(CommandHandler("set_setting", message_handler.set_setting_command))
-
-    # Callback query handlers
-    telegram_app.add_handler(CallbackQueryHandler(
-        message_handler.choose_role_button_callback, pattern="^choose_role_"
-    ))
-    telegram_app.add_handler(CallbackQueryHandler(
-        message_handler.remove_role_button_callback, pattern="^remove_role_"
-    ))
-    telegram_app.add_handler(CallbackQueryHandler(
-        message_handler.choose_model_button_callback, pattern="^choose_model_"
-    ))
-
-    telegram_app.add_handler(MessageHandler(~filters.COMMAND, message_handler.handle_message))
+    # Register all handlers
+    register_handlers(telegram_app, message_handler)
 
     logger.info("Telegram application created successfully")
     return telegram_app
@@ -177,10 +145,17 @@ def wakeup():
                 if not alive_chats:
                     return {"status": "ok", "message": "No alive chats", "sent": 0}, 0
 
+                # Check bot tokens once before processing any chats
+                bot_balance = await message_handler.model_manager.get_tokens(message_handler.bot_id)
+                if bot_balance is None or bot_balance <= 0:
+                    await message_handler.send_alert(f"🚨 Bot tokens depleted! The bot can no longer send spontaneous messages.")
+                    return {"status": "ok", "message": "Bot has no tokens", "sent": 0}, 0
+
                 sent_count = 0
                 for chat_data in alive_chats:
                     chat_id = chat_data['chat_id']
-                    if await message_handler.send_spontaneous_message(chat_id, application.bot):
+                    chance = chat_data['come_to_life_chance']
+                    if await message_handler.send_spontaneous_message(chat_id, application.bot, come_to_life_chance=chance):
                         sent_count += 1
 
                 return {"status": "ok", "checked": len(alive_chats), "sent": sent_count}, sent_count

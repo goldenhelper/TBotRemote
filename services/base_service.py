@@ -51,7 +51,7 @@ class BaseAIService:
     
         return formatted_messages
     
-    async def get_response(self, system_prompt: str, *, context_messages: List[dict] | None = None, query_without_context: str | None = None) -> Tuple[str, int, int, str | None, Dict[int, str] | None]:
+    async def get_response(self, system_prompt: str, *, context_messages: List[dict] | None = None, query_without_context: str | None = None, flat_history: bool = False) -> Tuple[str, int, int, str | None, Dict[int, str] | None]:
         """
         Get a response from the AI model.
         

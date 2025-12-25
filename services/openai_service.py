@@ -70,7 +70,7 @@ class OpenAIService(BaseAIService):
             logger.error(f"Error in video analysis: {e}", exc_info=True)
             return f"The video couldn't be analyzed."
 
-    async def get_response(self, system_prompt: str, *, context_messages: List[ChatMessage] | None = None, query_without_context: str | None = None) -> Tuple[str, int, int, str | None, Dict[int, str] | None]:
+    async def get_response(self, system_prompt: str, *, context_messages: List[ChatMessage] | None = None, query_without_context: str | None = None, flat_history: bool = False) -> Tuple[str, int, int, str | None, Dict[int, str] | None]:
         """
         Makes a request to the OpenAI model, supporting multimodal chat history.
         """

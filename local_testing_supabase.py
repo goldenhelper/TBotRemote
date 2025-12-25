@@ -3,15 +3,10 @@ Local testing script using Supabase instead of AWS.
 Uses polling mode for development.
 """
 from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    filters,
-    CallbackQueryHandler,
-)
+from telegram.ext import ApplicationBuilder
 from config_supabase import SupabaseConfig
 from handlers.message_handler import MainHandler
+from handlers.register_handlers import register_handlers
 from services.supabase_storage import SupabaseStorage
 from services.supabase_model_manager import SupabaseModelManager
 from services.supabase_role_manager import SupabaseRoleManager
@@ -146,47 +141,13 @@ def main():
         formatting_info=formatting_info,
         bot_id=int(bot_id),
         aws_region='',  # Not used with Supabase
+        alertobot_token=config.alertobot_token,
     )
 
     application = ApplicationBuilder().token(config.bot_token).build()
 
-    # Register handlers
-    application.add_handler(CommandHandler("start", message_handler.start_command))
-    application.add_handler(CommandHandler("help", message_handler.help_command))
-    application.add_handler(CommandHandler("tokens_amount", message_handler.get_tokens_command))
-    application.add_handler(CommandHandler("ask_for_tokens", message_handler.ask_for_tokens_command))
-
-    application.add_handler(CommandHandler("choose_model", message_handler.choose_model_command))
-    application.add_handler(CommandHandler("get_model_data", message_handler.get_model_data_command))
-    application.add_handler(CommandHandler("get_role", message_handler.get_role_command))
-    application.add_handler(CommandHandler("choose_role", message_handler.choose_role_command))
-    application.add_handler(CommandHandler("add_role", message_handler.add_role_command))
-    application.add_handler(CommandHandler("remove_role", message_handler.remove_role_command))
-    application.add_handler(CommandHandler("give_bot_tokens", message_handler.give_bot_tokens_command))
-    application.add_handler(CommandHandler("clear_history", message_handler.clear_history_command))
-    application.add_handler(CommandHandler("delete_chat", message_handler.delete_chat_command))
-    application.add_handler(CommandHandler("get_notes", message_handler.get_notes_command))
-    application.add_handler(CommandHandler("set_aliveness", message_handler.set_come_to_life_chance_command))
-    application.add_handler(CommandHandler("how_alive", message_handler.get_come_to_life_chance_command))
-    application.add_handler(CommandHandler("reset_model_data", message_handler.reset_model_data_command))
-    application.add_handler(CommandHandler("add_admin", message_handler.add_admin_command))
-    application.add_handler(CommandHandler("remove_admin", message_handler.remove_admin_command))
-    application.add_handler(CommandHandler("list_admins", message_handler.list_admins_command))
-    application.add_handler(CommandHandler("get_settings", message_handler.get_settings_command))
-    application.add_handler(CommandHandler("set_setting", message_handler.set_setting_command))
-
-    # Callback query handlers
-    application.add_handler(CallbackQueryHandler(
-        message_handler.choose_role_button_callback, pattern="^choose_role_"
-    ))
-    application.add_handler(CallbackQueryHandler(
-        message_handler.remove_role_button_callback, pattern="^remove_role_"
-    ))
-    application.add_handler(CallbackQueryHandler(
-        message_handler.choose_model_button_callback, pattern="^choose_model_"
-    ))
-
-    application.add_handler(MessageHandler(~filters.COMMAND, message_handler.handle_message))
+    # Register all handlers
+    register_handlers(application, message_handler)
 
     # Run the bot
     application.run_polling(allowed_updates=Update.ALL_TYPES)

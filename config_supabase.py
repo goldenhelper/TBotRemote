@@ -20,3 +20,6 @@ class SupabaseConfig(BaseSettings):
     # Supabase
     supabase_url: str
     supabase_key: str  # Use service_role key for full access
+
+    # Alert bot (optional)
+    alertobot_token: str = ""  # Token for alert bot notifications

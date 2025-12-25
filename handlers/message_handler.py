@@ -43,6 +43,7 @@ user_commands = {
 admin_commands = {
     "/get_model_data" : "Показывает текущую модельку.",
     "/give_bot_tokens" : "Дает боту токены.",
+    "/bot_tokens" : "Показывает сколько токенов у бота для спонтанных сообщений.",
     "/add_admin" : "Добавить админа: /add_admin <user_id>",
     "/remove_admin" : "Удалить админа: /remove_admin <user_id>",
     "/list_admins" : "Показать список админов.",
@@ -97,6 +98,7 @@ class MainHandler:
                  formatting_info: str,
                  api_keys: dict,
                  aws_region: str,
+                 alertobot_token: str = "",
                  ):
         """Initialize the MainHandler with required services and configurations."""
         self.model_manager = model_manager
@@ -107,6 +109,7 @@ class MainHandler:
         self.api_keys = api_keys
         self.bot_id = bot_id
         self.formatting_info = formatting_info
+        self.alertobot_token = alertobot_token
         # Ensure primary admin from config is in Supabase admin list
         if not self.storage.is_admin(self.admin_user_id):
             self.storage.add_admin_user(self.admin_user_id)
@@ -147,10 +150,14 @@ class MainHandler:
             self._media_handler = MediaHandler(self.storage, video_analyzer=self.video_analyzer)
         return self._media_handler
 
-    def get_full_system_prompt(self) -> str:
+    def get_full_system_prompt(self, is_spontaneous: bool = False) -> str:
         """
         Generate the complete system prompt by combining role, instructions, and notes.
-        
+
+        Args:
+            is_spontaneous: If True, adds instructions that this is a spontaneous wakeup
+                           and the bot can choose not to respond.
+
         Returns:
             str: Formatted system prompt with role, instructions, and notes sections
         """
@@ -161,10 +168,41 @@ class MainHandler:
         elif self.chat_type == 'group':
             chat_instruction = 'You are a part of a group with several other members. The user you should respond to is the last one who sent a message.\n'
 
-        
+        spontaneous_instruction = ''
+        if is_spontaneous:
+            spontaneous_instruction = '''<spontaneous_wakeup>
+You have been spontaneously awakened - nobody addressed you directly. You may choose to:
+- Jump into the conversation if you have something interesting, funny, or relevant to add
+- Stay silent by responding with an empty message if there's nothing worth saying
+Only speak if you genuinely have something to contribute. Don't force it.
 
-        
-        return f"{chat_instruction}<role>\n{self.current_role.prompt}\n</role>\n<instructions>\n{self.formatting_info}\n</instructions>\n<notes>\n{self.notes}\n</notes>"
+If you decide to respond, you can optionally reply to a specific message by starting your response with:
+reply_to: <message_id>
+(on its own line, followed by your actual message)
+
+For example:
+reply_to: 15519
+Haha, that's exactly what I was thinking!
+
+If you don't want to reply to a specific message, just write your response directly.
+</spontaneous_wakeup>
+'''
+        if hasattr(self, '_force_response') and self._force_response:
+            logger.info("Force response mode - using mandatory response prompt")
+            spontaneous_instruction = '''<spontaneous_wakeup>
+You have been spontaneously awakened. You MUST respond - staying silent is NOT an option.
+
+Write a short comment, joke, question, or reaction related to the recent conversation.
+Be natural and in character. Even a brief "Хаха, прикольно!" or similar is fine.
+
+IMPORTANT: Even if your last message was the most recent one in the conversation, you should still write another message now. This is a new spontaneous interjection.
+
+You can optionally reply to a specific message by starting with:
+reply_to: <message_id>
+</spontaneous_wakeup>
+'''
+
+        return f"{chat_instruction}{spontaneous_instruction}<role>\n{self.current_role.prompt}\n</role>\n<instructions>\n{self.formatting_info}\n</instructions>\n<notes>\n{self.notes}\n</notes>"
 
 
     def get_memory_updater_prompt(self, is_reasoner: bool, context_messages: str) -> str:
@@ -331,8 +369,8 @@ class MainHandler:
         #NOTE
         # Get response from AI model
         response_text, input_tokens, output_tokens, thinking, video_analysis_results = await self.llm_service.get_response(
-            system_prompt=self.get_full_system_prompt(),
-            context_messages=context_messages   
+            system_prompt=self.get_full_system_prompt(is_spontaneous=is_coming_to_life),
+            context_messages=context_messages
         )
 
         chat_id = update.message.chat_id
@@ -348,6 +386,15 @@ class MainHandler:
 
         await self.deduct_tokens(chat_id, input_tokens, output_tokens, self.llm_service.output_tokens_multiplier)
 
+        # Parse optional reply_to from response (for spontaneous messages)
+        reply_to_message_id = None
+        if is_coming_to_life:
+            reply_match = re.match(r'^\s*reply_to:\s*(\d+)\s*\n', response_text, flags=re.IGNORECASE)
+            if reply_match:
+                reply_to_message_id = int(reply_match.group(1))
+                response_text = response_text[reply_match.end():]
+                logger.info(f"Spontaneous message will reply to message {reply_to_message_id}")
+
         # Sanitize model output: strip media headers like "[GIF/Animation: ...]" and any accidental
         # metadata lines such as "message_id: ..., reply_to_id: ..., assistant[...]" that the model
         # might have echoed.
@@ -356,15 +403,29 @@ class MainHandler:
         # Remove leading bracketed media description (Image/GIF/Video/Sticker/Document) if present
         cleaned_text = re.sub(r'^\s*\[(?:Image|GIF/Animation|Video|Sticker|Document):[^\]]*\]\s*', '', cleaned_text, flags=re.IGNORECASE)
 
-        bot_message = await update.message.reply_text(cleaned_text)
-        
-        # Store user's message
+        # Skip if the model returned an empty response
+        if not cleaned_text or not cleaned_text.strip():
+            logger.info("Model returned empty response, skipping message send")
+            return None
+
+        # Send message - either as reply to specific message or to the triggering message
+        if is_coming_to_life and reply_to_message_id:
+            bot_message = await context.bot.send_message(
+                chat_id=update.message.chat_id,
+                text=cleaned_text,
+                reply_to_message_id=reply_to_message_id
+            )
+        else:
+            bot_message = await update.message.reply_text(cleaned_text)
+            reply_to_message_id = update.message.message_id
+
+        # Store bot's message
         bot_message = ChatMessage(
             message_id=bot_message.message_id,
             user=BOT_USER_DESCRIPTION,
             content=response_text,
             timestamp=bot_message.date.strftime("%a, %d. %b %Y %H:%M"),
-            reply_to_id=update.message.message_id,
+            reply_to_id=reply_to_message_id,
             reasoning=thinking,
         )
 
@@ -406,7 +467,8 @@ class MainHandler:
             await self.model_manager.add_chat_if_not_exists(self.bot_id)
 
             balance = await self.model_manager.get_tokens(self.bot_id)
-            if balance is None or balance == 0:
+            if balance is None or balance <= 0:
+                await self.send_alert(f"🚨 Bot tokens depleted! The bot can no longer send spontaneous messages.")
                 return
 
             if random() < self.come_to_life_chance:
@@ -684,6 +746,18 @@ class MainHandler:
     async def send_message_to_admin(self, message: str, bot) -> None:
         """Send a message to the admin"""
         await bot.send_message(chat_id=self.admin_user_id, text=message[-4096:])
+
+    async def send_alert(self, message: str) -> None:
+        """Send an alert via the alertobot"""
+        if not self.alertobot_token:
+            logger.warning("Alertobot token not configured, skipping alert")
+            return
+        try:
+            alert_bot = Bot(token=self.alertobot_token)
+            await alert_bot.send_message(chat_id=self.admin_user_id, text=message)
+            logger.info(f"Alert sent: {message[:50]}...")
+        except Exception as e:
+            logger.error(f"Failed to send alert: {e}")
 
 
     async def forward_to_admin(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1121,6 +1195,20 @@ class MainHandler:
         await self.model_manager.add_tokens(self.bot_id, tokens)
         await update.message.reply_text(f"Tokens have been added to the bot!")
 
+    @command_for_admin
+    async def bot_tokens_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show how many tokens the bot has for spontaneous messages"""
+        try:
+            logger.info(f"bot_tokens_command called by user {update.message.from_user.id}")
+            balance = await self.model_manager.get_tokens(self.bot_id)
+            logger.info(f"Bot balance: {balance}")
+            if balance is None:
+                await update.message.reply_text("Bot token balance not initialized yet.")
+            else:
+                await update.message.reply_text(f"🤖 Bot tokens: {balance:,}")
+        except Exception as e:
+            logger.error(f"Error in bot_tokens_command: {e}", exc_info=True)
+            await update.message.reply_text(f"Error: {e}")
 
     @command_in_identified_chats
     async def clear_history_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1360,34 +1448,42 @@ class MainHandler:
         except ValueError as e:
             await update.message.reply_text(f"Invalid value: {e}")
 
-    async def send_spontaneous_message(self, chat_id: int, bot: Bot) -> bool:
+    async def send_spontaneous_message(self, chat_id: int, bot: Bot, come_to_life_chance: float = None, force_response: bool = False) -> bool:
         """
         Send a spontaneous message to a chat if conditions are met.
 
         Args:
             chat_id: The Telegram chat ID to send to
             bot: The Telegram Bot instance
+            come_to_life_chance: Optional pre-fetched chance (skips DB lookup if provided)
+            force_response: If True, skip dice roll and tell model it must respond
 
         Returns:
             bool: True if message was sent, False otherwise
         """
         try:
-            # Get chat info
+            # Set force_response flag for prompt generation
+            self._force_response = force_response
+
+            # Roll the dice first (before any DB calls)
+            if come_to_life_chance is not None:
+                chance = come_to_life_chance
+            else:
+                # Fallback: fetch from DB if not provided
+                chat_info = await self.storage.get_chat_info(chat_id=chat_id)
+                if not chat_info:
+                    logger.warning(f"Chat {chat_id} not found for spontaneous message")
+                    return False
+                chance = chat_info.get('come_to_life_chance', 0)
+
+            if random() >= chance:
+                logger.debug(f"Spontaneous message dice roll failed for chat {chat_id}")
+                return False
+
+            # Dice roll succeeded - now fetch chat info for the actual message
             chat_info = await self.storage.get_chat_info(chat_id=chat_id)
             if not chat_info:
                 logger.warning(f"Chat {chat_id} not found for spontaneous message")
-                return False
-
-            # Check if bot has tokens
-            balance = await self.model_manager.get_tokens(self.bot_id)
-            if balance is None or balance <= 0:
-                logger.info(f"Bot has no tokens for spontaneous message")
-                return False
-
-            # Roll the dice based on come_to_life_chance
-            chance = chat_info.get('come_to_life_chance', 0)
-            if random() >= chance:
-                logger.debug(f"Spontaneous message dice roll failed for chat {chat_id}")
                 return False
 
             # Set up context
@@ -1420,10 +1516,12 @@ class MainHandler:
                 logger.info(f"No messages in chat {chat_id} for spontaneous response")
                 return False
 
-            # Generate response
+            # Generate response with spontaneous wakeup instruction
+            # Use flat_history=True for Claude to avoid issues when last message is from assistant
             response_text, input_tokens, output_tokens, thinking, _ = await self.llm_service.get_response(
-                system_prompt=self.get_full_system_prompt(),
-                context_messages=context_messages
+                system_prompt=self.get_full_system_prompt(is_spontaneous=True),
+                context_messages=context_messages,
+                flat_history=True
             )
 
             # Deduct tokens from bot's balance
@@ -1432,11 +1530,28 @@ class MainHandler:
             # Update model usage
             self.model_manager.used_model(self.llm_service.model_name)
 
+            # Parse optional reply_to from response
+            reply_to_message_id = None
+            reply_match = re.match(r'^\s*reply_to:\s*(\d+)\s*\n', response_text, flags=re.IGNORECASE)
+            if reply_match:
+                reply_to_message_id = int(reply_match.group(1))
+                response_text = response_text[reply_match.end():]
+                logger.info(f"Spontaneous message will reply to message {reply_to_message_id}")
+
             # Sanitize and send
             cleaned_text = re.sub(r'^\s*message_id:[^\n]*\n?', '', response_text, flags=re.IGNORECASE)
             cleaned_text = re.sub(r'^\s*\[(?:Image|GIF/Animation|Video|Sticker|Document):[^\]]*\]\s*', '', cleaned_text, flags=re.IGNORECASE)
 
-            sent_message = await bot.send_message(chat_id=chat_id, text=cleaned_text)
+            # Skip if the model returned an empty response
+            if not cleaned_text or not cleaned_text.strip():
+                logger.info(f"Model returned empty response for chat {chat_id}, skipping")
+                return False
+
+            sent_message = await bot.send_message(
+                chat_id=chat_id,
+                text=cleaned_text,
+                reply_to_message_id=reply_to_message_id
+            )
 
             # Store the bot's message
             bot_message = ChatMessage(
@@ -1444,7 +1559,7 @@ class MainHandler:
                 user=BOT_USER_DESCRIPTION,
                 content=response_text,
                 timestamp=sent_message.date.strftime("%a, %d. %b %Y %H:%M"),
-                reply_to_id=None,
+                reply_to_id=reply_to_message_id,
                 reasoning=thinking,
             )
             await self.storage.add_message(chat_id, bot_message)
