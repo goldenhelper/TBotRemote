@@ -819,7 +819,7 @@ reply_to: <message_id>
 
     
         if limits[model_lineika][model] is not None and usage.get(model, 0) >= limits[model_lineika][model]:
-            self.set_model(self.model_manager.best_allowed_model(model))
+            self.set_model(update.effective_chat.id, model)
             await update.message.reply_text(f"Сори, бро, моделька устала. Моделька сменилась на лучшую доступную модельку этой линейки.")
 
 
