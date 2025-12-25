@@ -4,7 +4,8 @@
       "Bash(find:*)",
       "Bash(grep:*)",
       "Bash(xargs basename:*)",
-      "Bash(python test_supabase.py:*)"
+      "Bash(python test_supabase.py:*)",
+      "Bash(ls:*)"
     ]
   }
 }

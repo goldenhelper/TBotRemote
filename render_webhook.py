@@ -141,10 +141,67 @@ def health():
     return jsonify({"status": "ok"}), 200
 
 
+@app.route('/wakeup', methods=['GET', 'POST'])
+def wakeup():
+    """
+    Wake-up endpoint that gives the bot a chance to send spontaneous messages.
+
+    This endpoint:
+    1. Gets all chats with come_to_life_chance > 0
+    2. For each chat, rolls the dice based on their aliveness setting
+    3. If successful, sends a spontaneous message to that chat
+
+    Can be called by a cron job to periodically wake the bot.
+    """
+    try:
+        application = create_application()
+
+        async def process_wakeup():
+            async with application:
+                # Get the message handler from the registered handlers
+                message_handler = None
+                for handler in application.handlers.get(0, []):
+                    if hasattr(handler, 'callback') and hasattr(handler.callback, '__self__'):
+                        handler_instance = handler.callback.__self__
+                        if hasattr(handler_instance, 'send_spontaneous_message'):
+                            message_handler = handler_instance
+                            break
+
+                if message_handler is None:
+                    logger.error("Could not find message handler for wakeup")
+                    return {"status": "error", "message": "Handler not found"}, 0
+
+                # Get chats with aliveness > 0
+                alive_chats = message_handler.storage.get_chats_with_aliveness()
+
+                if not alive_chats:
+                    return {"status": "ok", "message": "No alive chats", "sent": 0}, 0
+
+                sent_count = 0
+                for chat_data in alive_chats:
+                    chat_id = chat_data['chat_id']
+                    if await message_handler.send_spontaneous_message(chat_id, application.bot):
+                        sent_count += 1
+
+                return {"status": "ok", "checked": len(alive_chats), "sent": sent_count}, sent_count
+
+        result, sent = asyncio.run(process_wakeup())
+        return jsonify(result), 200
+
+    except Exception as e:
+        logger.error(f"Error in wakeup: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/', methods=['GET'])
 def index():
     """Root endpoint."""
-    return jsonify({"status": "Bot is running", "health": "/health", "webhook": "/webhook"}), 200
+    return jsonify({
+        "status": "Bot is running",
+        "health": "/health",
+        "webhook": "/webhook",
+        "wakeup": "/wakeup"
+    }), 200
 
 
 @app.route('/webhook', methods=['POST'])

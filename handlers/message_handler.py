@@ -1360,6 +1360,102 @@ class MainHandler:
         except ValueError as e:
             await update.message.reply_text(f"Invalid value: {e}")
 
+    async def send_spontaneous_message(self, chat_id: int, bot: Bot) -> bool:
+        """
+        Send a spontaneous message to a chat if conditions are met.
+
+        Args:
+            chat_id: The Telegram chat ID to send to
+            bot: The Telegram Bot instance
+
+        Returns:
+            bool: True if message was sent, False otherwise
+        """
+        try:
+            # Get chat info
+            chat_info = await self.storage.get_chat_info(chat_id=chat_id)
+            if not chat_info:
+                logger.warning(f"Chat {chat_id} not found for spontaneous message")
+                return False
+
+            # Check if bot has tokens
+            balance = await self.model_manager.get_tokens(self.bot_id)
+            if balance is None or balance <= 0:
+                logger.info(f"Bot has no tokens for spontaneous message")
+                return False
+
+            # Roll the dice based on come_to_life_chance
+            chance = chat_info.get('come_to_life_chance', 0)
+            if random() >= chance:
+                logger.debug(f"Spontaneous message dice roll failed for chat {chat_id}")
+                return False
+
+            # Set up context
+            self.current_role_id = chat_info['current_role_id']
+            self.notes = chat_info['notes']
+            self.current_role = await self.storage.get_current_role(chat_id=chat_id)
+            self.chat_type = 'group'  # Assume group for spontaneous messages
+            model_name = chat_info['model']
+
+            # Initialize LLM service
+            provider_key = _provider_key(model_name)
+            service_cls = PROVIDERS[provider_key]
+
+            video_analyzer = GeminiService(
+                api_key=self.api_keys['gemini'],
+                model_name=self.video_analyzer_model,
+                thinking_model=False
+            ) if provider_key != 'gemini' else None
+
+            init_kwargs = {
+                'api_key': self.api_keys[provider_key],
+                'model_name': model_name,
+                'video_analyzer': video_analyzer,
+            }
+            self.llm_service = service_cls(**init_kwargs)
+
+            # Get recent messages for context
+            context_messages = await self.storage.get_recent_messages(chat_id, limit=SHORT_TERM_MEMORY)
+            if not context_messages:
+                logger.info(f"No messages in chat {chat_id} for spontaneous response")
+                return False
+
+            # Generate response
+            response_text, input_tokens, output_tokens, thinking, _ = await self.llm_service.get_response(
+                system_prompt=self.get_full_system_prompt(),
+                context_messages=context_messages
+            )
+
+            # Deduct tokens from bot's balance
+            await self.deduct_tokens(self.bot_id, input_tokens, output_tokens, self.llm_service.output_tokens_multiplier)
+
+            # Update model usage
+            self.model_manager.used_model(self.llm_service.model_name)
+
+            # Sanitize and send
+            cleaned_text = re.sub(r'^\s*message_id:[^\n]*\n?', '', response_text, flags=re.IGNORECASE)
+            cleaned_text = re.sub(r'^\s*\[(?:Image|GIF/Animation|Video|Sticker|Document):[^\]]*\]\s*', '', cleaned_text, flags=re.IGNORECASE)
+
+            sent_message = await bot.send_message(chat_id=chat_id, text=cleaned_text)
+
+            # Store the bot's message
+            bot_message = ChatMessage(
+                message_id=sent_message.message_id,
+                user=BOT_USER_DESCRIPTION,
+                content=response_text,
+                timestamp=sent_message.date.strftime("%a, %d. %b %Y %H:%M"),
+                reply_to_id=None,
+                reasoning=thinking,
+            )
+            await self.storage.add_message(chat_id, bot_message)
+
+            logger.info(f"Sent spontaneous message to chat {chat_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error sending spontaneous message to chat {chat_id}: {e}", exc_info=True)
+            return False
+
 
 PROVIDERS = {
     'claude': ClaudeService,

@@ -536,3 +536,42 @@ class SupabaseStorage(Storage):
         except Exception as e:
             logger.error(f"Error setting bot settings: {e}")
             return False
+
+    def get_chats_with_aliveness(self) -> List[dict]:
+        """Get all chats that have come_to_life_chance > 0."""
+        result = self.client.table('chats')\
+            .select('chat_id, come_to_life_chance')\
+            .gt('come_to_life_chance', 0)\
+            .execute()
+        return result.data if result.data else []
+
+    async def get_recent_messages(self, chat_id: int, limit: int = 25) -> List[ChatMessage]:
+        """Get the most recent messages for a chat."""
+        result = self.client.table('messages')\
+            .select('*')\
+            .eq('chat_id', chat_id)\
+            .order('message_id', desc=True)\
+            .limit(limit)\
+            .execute()
+
+        messages = []
+        for msg_data in reversed(result.data):  # Reverse to get chronological order
+            sticker = msg_data.get('sticker')
+            if sticker is None:
+                sticker = {"emoji": None, "is_animated": None, "is_video": None}
+
+            node = ChatMessage(
+                message_id=msg_data['message_id'],
+                user=msg_data['user_name'],
+                content=msg_data['content'] or '',
+                timestamp=msg_data['timestamp'] or '',
+                reply_to_id=msg_data.get('reply_to_id'),
+                media_type=msg_data.get('media_type'),
+                file_id=msg_data.get('file_id'),
+                media_description=msg_data.get('media_description'),
+                sticker=sticker,
+                reasoning=msg_data.get('reasoning'),
+            )
+            messages.append(node)
+
+        return messages
