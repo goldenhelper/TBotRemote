@@ -64,6 +64,18 @@ class SupabaseStorage(Storage):
     def video_analyzer_model(self) -> str:
         return self.get_bot_setting('video_analyzer_model')
 
+    @property
+    def short_term_memory(self) -> int:
+        return self.get_bot_setting('short_term_memory')
+
+    @property
+    def memory_updater_prompt(self) -> str:
+        return self.get_bot_setting('memory_updater_prompt')
+
+    @property
+    def video_analyzer_prompt(self) -> str:
+        return self.get_bot_setting('video_analyzer_prompt')
+
     async def initialize_chat(self, chat_id: int):
         """Initialize a new chat with default structure."""
         # Check if chat exists

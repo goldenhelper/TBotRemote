@@ -4,6 +4,7 @@ Uses polling mode for development.
 """
 from telegram import Update
 from telegram.ext import ApplicationBuilder
+from telegram.request import HTTPXRequest
 from config_supabase import SupabaseConfig
 from handlers.message_handler import MainHandler
 from handlers.register_handlers import register_handlers
@@ -144,7 +145,22 @@ def main():
         alertobot_token=config.alertobot_token,
     )
 
-    application = ApplicationBuilder().token(config.bot_token).build()
+    # Configure request with longer timeouts
+    request = HTTPXRequest(
+        connection_pool_size=8,
+        connect_timeout=20.0,
+        read_timeout=20.0,
+        write_timeout=20.0,
+        pool_timeout=10.0,
+    )
+
+    application = (
+        ApplicationBuilder()
+        .token(config.bot_token)
+        .request(request)
+        .get_updates_request(request)
+        .build()
+    )
 
     # Register all handlers
     register_handlers(application, message_handler)

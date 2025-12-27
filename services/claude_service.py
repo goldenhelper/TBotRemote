@@ -62,25 +62,25 @@ class ClaudeService(BaseAIService):
             logger.error(f"Error in video analysis: {e}", exc_info=True)
             return f"[Video analysis failed: {str(e)}]"
 
-    async def get_response(self, system_prompt: str, *, context_messages: List[ChatMessage] | None = None, query_without_context: str | None = None, flat_history: bool = False) -> Tuple[str, int, int, str | None, Dict[int, str] | None]:
+    async def get_response(self, system_prompt: str, *, context_messages: List[ChatMessage] | None = None, query_without_context: str | None = None, flat_history: bool = True) -> Tuple[str, int, int, str | None, Dict[int, str] | None]:
         """
         Makes a request to the Claude model, supporting multimodal chat history.
 
         Args:
-            flat_history: If True, send all messages as a single user message instead of
-                         splitting into user/assistant roles. Useful for spontaneous wakeup
-                         where the last message might be from assistant.
+            flat_history: If True (default), send all messages as a single user message
+                         instead of splitting into user/assistant roles. This is more
+                         reliable and avoids issues with consecutive same-role messages.
         """
         if not (context_messages is None or query_without_context is None):
             raise ValueError("Either context_messages or query_without_context must be given")
 
         try:
             if context_messages is not None:
-                # Flat history mode: send everything as a single user message
+                # Flat history mode: send everything as a single user message (default)
                 if flat_history:
                     flat_text = self.format_messages(context_messages)
                     formatted_messages = [{"role": "user", "content": flat_text}]
-                    logger.info(f"Using flat history mode with {len(context_messages)} messages")
+                    logger.debug(f"Using flat history mode with {len(context_messages)} messages")
                 else:
                     # Build multimodal message content (original approach)
                     # This splits messages into user/assistant roles

@@ -71,12 +71,12 @@ class MediaHandler:
     def get_video_analysis_prompt(self, duration, width, height) -> str:
         """
         Generate a role-aware prompt for video analysis.
-        
+
         Args:
             duration: Video duration
-            width: Video width  
+            width: Video width
             height: Video height
-            
+
         Returns:
             str: System prompt for video analysis
         """
@@ -88,7 +88,7 @@ class MediaHandler:
             {self.current_role.prompt}
             </main_bot_role>
             """
-        
+
         note_section = ""
         if self.chat_notes:
             note_section = f"""
@@ -102,40 +102,22 @@ class MediaHandler:
             chat_context = "This is a private chat between the user and the bot."
         elif self.chat_type == 'group':
             chat_context = "This is a group chat with multiple participants."
-        
+
+        # Get the configurable video analyzer prompt from storage
+        video_prompt_template = self.storage.video_analyzer_prompt
+
         system_prompt = f"""
             {role_section}
             {note_section}
-            <task>
-            You are a VIDEO ANALYZER providing factual descriptions for another AI model (the main bot). 
-            Your ONLY job is to describe what you see in the video/animation.
-            The main bot (described above) will use your description to respond to the user in its own character.
-            You are NOT the main bot - you are just the analyzer providing visual information.
-            Do NOT adopt the main bot's personality or respond to the user yourself.
-            </task>
+            {video_prompt_template}
 
             <video_metadata>
             Duration: {duration}s
             Dimensions: {width}x{height}
             {chat_context}
             </video_metadata>
-
-            <instructions>
-            1. You are ONLY the video analyzer - not the main bot with the personality described above.
-            2. Observe key visual elements: people, objects, actions, text, colours, lighting, atmosphere, movement.
-            3. Mention important audio cues only if they change understanding.
-            4. Avoid speculation beyond what is visible/audible.
-            5. Write a neutral, factual description that helps the main bot understand the content.
-            6. Do NOT address the user directly, provide commentary, reactions, or adopt the main bot's personality.
-            7. Do NOT use meta-phrases such as "This video shows" or "Here is a description".
-            8. Write 6–12 sentences (or more if needed) to capture all significant details; err on the side of thoroughness rather than brevity. Use the chat's language.
-            </instructions>
-
-            <output_format>
-            Return ONLY the description text - no direct user address.
-            </output_format>
             """
-        
+
         return system_prompt
     
     async def handle_media_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> ChatMessage:

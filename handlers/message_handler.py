@@ -49,6 +49,10 @@ admin_commands = {
     "/list_admins" : "Показать список админов.",
     "/get_settings" : "Показать все настройки бота.",
     "/set_setting" : "Изменить настройку: /set_setting <key> <value>",
+    "/get_memory_prompt" : "Показать промпт обновления памяти.",
+    "/set_memory_prompt" : "Изменить промпт обновления памяти.",
+    "/get_video_prompt" : "Показать промпт видео-анализатора.",
+    "/set_video_prompt" : "Изменить промпт видео-анализатора.",
 }   
 
 DEBUG = True
@@ -207,138 +211,29 @@ reply_to: <message_id>
 
     def get_memory_updater_prompt(self, is_reasoner: bool, context_messages: str) -> str:
         if is_reasoner:
-            output_format =  '''- Output ONLY the final notes without tags.
+            output_format = '''- Output ONLY the final notes without tags.
                 - Notes should be UNDER 250 words.
                 - Notes should be in the same language as your role or the conversation.
                 - Use bullet points for clarity and organization.
                 - Include temporal and relationship tags where appropriate.'''
         else:
-            output_format = '''- First, write your thinking inside <thinking> tags.  
+            output_format = '''- First, write your thinking inside <thinking> tags.
                 - Then, output the final notes inside <updated_notes> tags.
                 - Notes should be UNDER 250 words.
                 - Notes should be in the same language as your role or the conversation.
                 - Use bullet points for clarity and organization.
                 - Include temporal and relationship tags where appropriate.'''
 
-        system_prompt = f'''
-            <role>
-            {self.current_role.prompt}
-            </role>
-            <task>
-            SYSTEM PROMPT UPDATE: Refresh your long-term memory (notes).  
-            Your existing notes are below and you will be provided the last {SHORT_TERM_MEMORY} messages. Update your notes by adding new critical information that aligns with your role. Prioritize facts that help you stay consistent, personalized, and effective in your role.
-            </task>
-            <current_notes>
-            {self.notes['text']}
-            </current_notes>
-            <instructions>
-            1. **Chain-of-Thought Process**:  
-                - **Step 2**: Analyze recent messages. Identify key details with special attention to:
-                    * Character traits, preferences, and patterns
-                    * Time-sensitive information (events, deadlines, future plans)
-                    * Emotional states or personal situations
-                    * For group chats: Interpersonal dynamics and relationships between members
-                - **Step 3**: Cross-check with existing notes. Flag duplicates, outdated info, or role-critical gaps.  
-                - **Step 4**: Decide what to add/modify/retain based on:
-                    * Relevance to your role
-                    * Temporal importance (attach dates where applicable)
-                    * Long-term value for relationship building
-                    * Group dynamics (for group chats)
-                
-            2. **Temporal Information Handling**:
-                - For time-sensitive information (e.g., "birthday next week", "job interview tomorrow"):
-                    * Add a temporal tag [Until: YYYY-MM-DD] for expiration dates
-                    * Update/remove expired time-sensitive entries
-                - For persistent traits or preferences:
-                    * Mark with [Core Trait] to indicate high retention priority
-                - For temporary states (moods, situations):
-                    * Use to update understanding of character but don't retain specific instances unless pattern-forming
+        # Get the template from storage and fill in placeholders
+        prompt_template = self.storage.memory_updater_prompt
+        short_term_memory = self.storage.short_term_memory
 
-            3. **Memory Retention Guidelines**:
-                - Preserve information about core traits, preferences, and important facts
-                - Be conservative with deletions - only remove notes that are:
-                    * Conclusively outdated or superseded
-                    * Contradicted by newer, more reliable information
-                    * No longer relevant to your role or the conversation trajectory
-                - If uncertain about relevance, retain the information
-                - Condense similar or related information to maintain conciseness
-
-            4. **Group Chat Relationship Tracking**:
-                - Map relationships and dynamics between members:
-                    * Identify close friendships, rivalries, or professional connections
-                    * Note conversation patterns (who talks to whom, response tones)
-                    * Record shared experiences or inside references between members
-                    * Track shifting alliances or relationship changes over time
-                - Use relationship tags to organize interpersonal information:
-                    * [Relation: Person1-Person2] to mark relationship-specific notes
-                    * [Group Dynamic] for patterns involving multiple members
-                - Consider the social context when responding (e.g., avoiding topics sensitive to specific relationships)
-
-            5. **Output Format**:  
-                {output_format}
-            </instructions>
-            <example_response>
-            <!-- Example: Life Coach Role (Private Chat) -->
-            <thinking>
-                1. My role is "Life Coach": I need to track goals, obstacles, personal values, and progress.
-                2. In recent messages (dated 2025-02-25):
-                - User mentioned starting a new job on March 15th
-                - User expressed anxiety about public speaking
-                - User shared they'll be visiting parents April 5-10
-                - User mentioned they value work-life balance repeatedly
-                3. Current notes review:
-                - Already have "enjoys hiking on weekends" - still relevant
-                - Have "preparing for job interview" - now outdated since they got the job
-                - Have "struggles with morning routine" - no recent mention, but likely still relevant
-                4. Actions needed:
-                - Remove job interview note and replace with new job info
-                - Add public speaking anxiety as character trait
-                - Add time-sensitive parent visit
-                - Strengthen note about work-life balance as a core value
-                - Retain hiking preference and morning routine struggle
-            </thinking>
-            <updated_notes>
-                - [Core Trait] Values work-life balance strongly
-                - [Core Trait] Experiences anxiety about public speaking
-                - [Until: 2025-03-15] Starting new job on March 15th
-                - [Until: 2025-04-10] Visiting parents April 5-10
-                - Enjoys hiking on weekends
-                - Struggles with morning routine consistency
-            </updated_notes>
-
-            <!-- Example: Group Moderator Role (Group Chat) -->
-            <thinking>
-                1. My role is "Group Moderator": I need to track group dynamics, individual preferences, discussion topics, and potential sensitivities.
-                2. In recent messages (dated 2025-03-01):
-                - Alex and Jamie discussed their shared interest in rock climbing
-                - Taylor expressed frustration when interrupted by Chris twice
-                - Sam mentioned planning a group hike on March 15th
-                - Alex has consistently shown expertise in finance topics
-                - Jamie and Taylor appear to know each other outside the group
-                3. Current notes review:
-                - Already noted "Chris tends to dominate conversations" - reinforced by recent behavior
-                - Have "group book discussion scheduled Feb 20th" - now outdated
-                - Have "Sam is new to the group" - still relevant
-                4. Actions needed:
-                - Remove outdated book discussion note
-                - Add Jamie-Alex rock climbing connection
-                - Add Taylor-Chris tension
-                - Add Sam's hiking plan
-                - Note Jamie-Taylor external relationship
-                - Strengthen note about Alex's finance expertise
-                - Retain Chris's conversation style and Sam's newcomer status
-            </thinking>
-            <updated_notes>
-                - [Group Dynamic] Group tends to focus on outdoor activities and finance topics
-                - [Until: 2025-03-15] Sam organizing group hike on March 15th
-                - [Core Trait] Alex has expertise in finance discussions
-                - [Core Trait] Chris tends to interrupt others, particularly noticeable with Taylor
-                - [Relation: Alex-Jamie] Share interest in rock climbing
-                - [Relation: Jamie-Taylor] Appear to have relationship outside the group
-                - Sam is relatively new to the group
-            </updated_notes>
-            </example_response>
-            '''
+        system_prompt = prompt_template.format(
+            role_prompt=self.current_role.prompt,
+            short_term_memory=short_term_memory,
+            notes_text=self.notes['text'],
+            output_format=output_format
+        )
         
 
 
@@ -439,7 +334,7 @@ reply_to: <message_id>
                 await self.storage.update_message_description(chat_id, message_id, analysis_text)
 
         # Update memory if needed
-        if await self.storage.increment_notes_counter(chat_id=update.message.chat_id, short_term_memory=SHORT_TERM_MEMORY):
+        if await self.storage.increment_notes_counter(chat_id=update.message.chat_id, short_term_memory=self.storage.short_term_memory):
             updated_notes, input_tokens, output_tokens, notes_thinking = await self.update_memory(context_messages, chat_id)
             await self.send_message_to_admin(f"Context messages: {BaseAIService.format_messages(context_messages)}\n\nThinking: {thinking}\n\nUpdated notes: {updated_notes}", context.bot)
 
@@ -591,7 +486,8 @@ reply_to: <message_id>
             )
             
             # Retrieve recent context messages before handling new input
-            context_messages = await self.storage.get_message_context(update, context, SHORT_TERM_MEMORY, max_reply_depth=SHORT_TERM_MEMORY//2)
+            short_term_memory = self.storage.short_term_memory
+            context_messages = await self.storage.get_message_context(update, context, short_term_memory, max_reply_depth=short_term_memory//2)
             
             # Process any media in the message first
             media_message = await self.media_handler.handle_media_message(update, context)
@@ -632,7 +528,7 @@ reply_to: <message_id>
             nice_context_messages = "\n\n".join(format_context_message(msg) for msg in context_messages)
             await self.send_message_to_admin(f"Context messages: {nice_context_messages}", context.bot)
 
-            if await self.storage.increment_notes_counter(chat_id=update.message.chat_id, short_term_memory=SHORT_TERM_MEMORY):
+            if await self.storage.increment_notes_counter(chat_id=update.message.chat_id, short_term_memory=self.storage.short_term_memory):
                 updated_notes, input_tokens, output_tokens, thinking  = await self.update_memory(context_messages, chat_id)
                 log("Thinking:", thinking)
                 await self.send_message_to_admin(f"Context messages: {nice_context_messages}\n\nThinking: {thinking}\n\nUpdated notes: {updated_notes}", context.bot)
@@ -1404,8 +1300,16 @@ reply_to: <message_id>
         """Show all bot settings."""
         settings = self.storage.get_bot_settings()
         lines = ["Bot Settings:"]
+        # Long prompt settings that have dedicated commands
+        prompt_settings = {'memory_updater_prompt', 'video_analyzer_prompt'}
         for key, value in settings.items():
-            lines.append(f"• {key}: {value}")
+            if key in prompt_settings:
+                # Show abbreviated info for long prompts
+                length = len(value) if isinstance(value, str) else 0
+                cmd = key.replace('_updater_prompt', '_prompt').replace('_analyzer_prompt', '_prompt')
+                lines.append(f"• {key}: ({length} chars) - use /get_{cmd} to view")
+            else:
+                lines.append(f"• {key}: {value}")
         await update.message.reply_text("\n".join(lines))
 
     @command_for_admin
@@ -1448,6 +1352,88 @@ reply_to: <message_id>
                 await update.message.reply_text(f"Failed to update setting: {key}")
         except ValueError as e:
             await update.message.reply_text(f"Invalid value: {e}")
+
+    @command_for_admin
+    async def get_memory_prompt_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show the current memory updater prompt template."""
+        prompt = self.storage.memory_updater_prompt
+        # Split into chunks if too long for Telegram (4096 char limit)
+        if len(prompt) <= 4000:
+            await update.message.reply_text(f"Memory Updater Prompt:\n\n{prompt}")
+        else:
+            await update.message.reply_text(f"Memory Updater Prompt (part 1):\n\n{prompt[:4000]}")
+            for i in range(4000, len(prompt), 4000):
+                await update.message.reply_text(f"(continued):\n\n{prompt[i:i+4000]}")
+
+        await update.message.reply_text(
+            "Available placeholders:\n"
+            "• {role_prompt} - Current role's prompt\n"
+            "• {short_term_memory} - Number of context messages\n"
+            "• {notes_text} - Current notes content\n"
+            "• {output_format} - Auto-generated output format"
+        )
+
+    @command_for_admin
+    async def set_memory_prompt_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Set the memory updater prompt template. Usage: /set_memory_prompt <prompt>"""
+        text = update.message.text
+        # Extract prompt after the command
+        prompt = text.split(maxsplit=1)[1] if len(text.split(maxsplit=1)) > 1 else None
+
+        if not prompt:
+            await update.message.reply_text(
+                "Usage: /set_memory_prompt <prompt>\n\n"
+                "The prompt should contain placeholders:\n"
+                "• {role_prompt} - Current role's prompt\n"
+                "• {short_term_memory} - Number of context messages\n"
+                "• {notes_text} - Current notes content\n"
+                "• {output_format} - Auto-generated output format\n\n"
+                "Use /get_memory_prompt to see the current template."
+            )
+            return
+
+        # Validate that required placeholders are present
+        required_placeholders = ['{role_prompt}', '{notes_text}', '{output_format}']
+        missing = [p for p in required_placeholders if p not in prompt]
+        if missing:
+            await update.message.reply_text(
+                f"Warning: Missing recommended placeholders: {', '.join(missing)}\n"
+                f"Proceeding anyway..."
+            )
+
+        if self.storage.set_bot_setting('memory_updater_prompt', prompt):
+            await update.message.reply_text("Memory updater prompt updated successfully!")
+        else:
+            await update.message.reply_text("Failed to update memory updater prompt.")
+
+    @command_for_admin
+    async def get_video_prompt_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show the current video analyzer prompt template."""
+        prompt = self.storage.video_analyzer_prompt
+        if len(prompt) <= 4000:
+            await update.message.reply_text(f"Video Analyzer Prompt:\n\n{prompt}")
+        else:
+            await update.message.reply_text(f"Video Analyzer Prompt (part 1):\n\n{prompt[:4000]}")
+            for i in range(4000, len(prompt), 4000):
+                await update.message.reply_text(f"(continued):\n\n{prompt[i:i+4000]}")
+
+    @command_for_admin
+    async def set_video_prompt_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Set the video analyzer prompt template. Usage: /set_video_prompt <prompt>"""
+        text = update.message.text
+        prompt = text.split(maxsplit=1)[1] if len(text.split(maxsplit=1)) > 1 else None
+
+        if not prompt:
+            await update.message.reply_text(
+                "Usage: /set_video_prompt <prompt>\n\n"
+                "Use /get_video_prompt to see the current template."
+            )
+            return
+
+        if self.storage.set_bot_setting('video_analyzer_prompt', prompt):
+            await update.message.reply_text("Video analyzer prompt updated successfully!")
+        else:
+            await update.message.reply_text("Failed to update video analyzer prompt.")
 
     async def send_spontaneous_message(self, chat_id: int, bot: Bot, come_to_life_chance: float = None, force_response: bool = False) -> bool:
         """
@@ -1512,7 +1498,7 @@ reply_to: <message_id>
             self.llm_service = service_cls(**init_kwargs)
 
             # Get recent messages for context
-            context_messages = await self.storage.get_recent_messages(chat_id, limit=SHORT_TERM_MEMORY)
+            context_messages = await self.storage.get_recent_messages(chat_id, limit=self.storage.short_term_memory)
             if not context_messages:
                 logger.info(f"No messages in chat {chat_id} for spontaneous response")
                 return False

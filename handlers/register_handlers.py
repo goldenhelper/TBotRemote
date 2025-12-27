@@ -32,6 +32,10 @@ def register_handlers(application, message_handler):
     application.add_handler(CommandHandler("list_admins", message_handler.list_admins_command))
     application.add_handler(CommandHandler("get_settings", message_handler.get_settings_command))
     application.add_handler(CommandHandler("set_setting", message_handler.set_setting_command))
+    application.add_handler(CommandHandler("get_memory_prompt", message_handler.get_memory_prompt_command))
+    application.add_handler(CommandHandler("set_memory_prompt", message_handler.set_memory_prompt_command))
+    application.add_handler(CommandHandler("get_video_prompt", message_handler.get_video_prompt_command))
+    application.add_handler(CommandHandler("set_video_prompt", message_handler.set_video_prompt_command))
 
     # Callback query handlers
     application.add_handler(CallbackQueryHandler(

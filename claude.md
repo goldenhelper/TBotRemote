@@ -1,0 +1,1 @@
+use mnt/... for C:/Users/misha/miniconda3/envs/telegrambot/python.exe
