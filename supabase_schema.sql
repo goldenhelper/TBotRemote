@@ -86,6 +86,9 @@ INSERT INTO config (key, value) VALUES (
         "openai": {
             "gpt-4o": 100,
             "o3-2025-04-16": 50
+        },
+        "openrouter": {
+            "kimi-k2": 500
         }
     }'::jsonb
 );

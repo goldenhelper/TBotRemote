@@ -138,6 +138,8 @@ class SupabaseModelManager:
             provider_key = 'claude'
         elif requested in limits['openai']:
             provider_key = 'openai'
+        elif requested in limits.get('openrouter', {}):
+            provider_key = 'openrouter'
         else:
             raise ValueError(f"Unknown model family: {model_name}")
 

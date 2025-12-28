@@ -6,7 +6,8 @@
       "Bash(xargs basename:*)",
       "Bash(python test_supabase.py:*)",
       "Bash(ls:*)",
-      "Bash(python test_cleaning.py:*)"
+      "Bash(python test_cleaning.py:*)",
+      "Bash(python -m py_compile:*)"
     ]
   }
 }

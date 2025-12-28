@@ -10,6 +10,7 @@ from services.model_manager import ModelManager
 from services.claude_service import ClaudeService
 from services.gemini_service import GeminiService
 from services.openai_service import OpenAIService
+from services.openrouter_service import OpenRouterService
 from services.image_service import ImageService
 from services.chat_history import Storage
 from services.role_manager import RoleManager, Role
@@ -632,6 +633,13 @@ reply_to: <message_id>
                 model_name=model_name,
                 video_analyzer=self.video_analyzer,
             )
+        elif model_name.startswith(('kimi', 'moonshotai/')):
+            # OpenRouter delegates video work to the shared analyser
+            self.llm_service = OpenRouterService(
+                api_key=self.api_keys['openrouter'],
+                model_name=model_name,
+                video_analyzer=self.video_analyzer,
+            )
         else:
             raise ValueError(f"Unknown model: {model_name}")
 
@@ -703,6 +711,8 @@ reply_to: <message_id>
             model_lineika = 'claude'
         elif model.startswith(('openai', 'gpt', 'o1', 'o3')):
             model_lineika = 'openai'
+        elif model.startswith(('kimi', 'moonshotai/')):
+            model_lineika = 'openrouter'
         else:
             model_lineika = 'unknown'  # Should not happen, caught earlier
 
@@ -981,11 +991,18 @@ reply_to: <message_id>
         openai_buttons = []
         for model in limits.get('openai', {}).keys():
             openai_buttons.append(InlineKeyboardButton(model, callback_data=f"choose_model_{model}"))
-        
+
+        # Add OpenRouter models
+        openrouter_buttons = []
+        for model in limits.get('openrouter', {}).keys():
+            openrouter_buttons.append(InlineKeyboardButton(model, callback_data=f"choose_model_{model}"))
+
         # Add buttons to keyboard
         keyboard.append(gemini_buttons)
         keyboard.append(claude_buttons)
         keyboard.append(openai_buttons)
+        if openrouter_buttons:
+            keyboard.append(openrouter_buttons)
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text("Choose a model:", reply_markup=reply_markup)
@@ -1563,10 +1580,12 @@ PROVIDERS = {
     'claude': ClaudeService,
     'gemini': GeminiService,
     'openai': OpenAIService,
+    'openrouter': OpenRouterService,
 }
 
 def _provider_key(model_name: str) -> str:
     if model_name.startswith('gemini'):  return 'gemini'
     if model_name.startswith('claude'):  return 'claude'
     if model_name.startswith(('openai', 'gpt', 'o1', 'o3')):  return 'openai'
+    if model_name.startswith(('kimi', 'moonshotai/')):  return 'openrouter'
     raise ValueError(f'Unknown model: {model_name}')

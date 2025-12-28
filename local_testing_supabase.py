@@ -137,6 +137,7 @@ def main():
             'gemini': config.gemini_api_key,
             'claude': config.claude_api_key,
             'openai': config.openai_api_key,
+            'openrouter': config.openrouter_api_key,
         },
         admin_user_id=config.admin_user_id,
         formatting_info=formatting_info,

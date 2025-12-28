@@ -16,6 +16,7 @@ class SupabaseConfig(BaseSettings):
     claude_api_key: str
     gemini_api_key: str
     openai_api_key: str
+    openrouter_api_key: str
 
     # Supabase
     supabase_url: str

@@ -28,4 +28,7 @@ ALLOWED_MODELS_LIMITS = {
     "openai": {
         "gpt-5-2025-08-07": 125,
     },
+    "openrouter": {
+        "kimi-k2": 500,
+    },
 }
