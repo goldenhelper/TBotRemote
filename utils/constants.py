@@ -24,11 +24,14 @@ ALLOWED_MODELS_LIMITS = {
     "claude": {
         "claude-4-opus-latest": 1000,
         "claude-4-sonnet-latest": 1000,
+        "claude-haiku-4-5": 1000,
     },
     "openai": {
         "gpt-5-2025-08-07": 125,
     },
     "openrouter": {
         "kimi-k2": 500,
+        "grok-4.1-fast": 500,
+        "deepseek-v3.2": 500,
     },
 }

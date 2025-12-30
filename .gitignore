@@ -41,3 +41,7 @@ chat_history/
 
 # Local configuration
 config_local.py
+
+.claude/
+
+CLAUDE.md

@@ -291,10 +291,14 @@ reply_to: <message_id>
                 response_text = response_text[reply_match.end():]
                 logger.info(f"Spontaneous message will reply to message {reply_to_message_id}")
 
-        # Sanitize model output: strip media headers like "[GIF/Animation: ...]" and any accidental
-        # metadata lines such as "message_id: ..., reply_to_id: ..., assistant[...]" that the model
-        # might have echoed.
-        cleaned_text = re.sub(r'^\s*message_id:[^\n]*\n?', '', response_text, flags=re.IGNORECASE)
+        # Sanitize model output: strip any accidental metadata lines the model might have echoed.
+        # Matches patterns like: "message_id: 123, reply_to_id: 456, assistant[Mon, 29. Dec 2025 10:21]:"
+        cleaned_text = re.sub(
+            r'^\s*message_id:\s*\d+,\s*reply_to_id:\s*\d+,\s*\w+\[[^\]]*\]:\s*\n?',
+            '',
+            response_text,
+            flags=re.IGNORECASE
+        )
 
         # Remove leading bracketed media description (Image/GIF/Video/Sticker/Document) if present
         cleaned_text = re.sub(r'^\s*\[(?:Image|GIF/Animation|Video|Sticker|Document):[^\]]*\]\s*', '', cleaned_text, flags=re.IGNORECASE)
@@ -633,7 +637,7 @@ reply_to: <message_id>
                 model_name=model_name,
                 video_analyzer=self.video_analyzer,
             )
-        elif model_name.startswith(('kimi', 'moonshotai/')):
+        elif model_name.startswith(('kimi', 'moonshotai/', 'grok', 'x-ai/', 'deepseek')):
             # OpenRouter delegates video work to the shared analyser
             self.llm_service = OpenRouterService(
                 api_key=self.api_keys['openrouter'],
@@ -711,7 +715,7 @@ reply_to: <message_id>
             model_lineika = 'claude'
         elif model.startswith(('openai', 'gpt', 'o1', 'o3')):
             model_lineika = 'openai'
-        elif model.startswith(('kimi', 'moonshotai/')):
+        elif model.startswith(('kimi', 'moonshotai/', 'grok', 'x-ai/', 'deepseek')):
             model_lineika = 'openrouter'
         else:
             model_lineika = 'unknown'  # Should not happen, caught earlier
@@ -1587,5 +1591,5 @@ def _provider_key(model_name: str) -> str:
     if model_name.startswith('gemini'):  return 'gemini'
     if model_name.startswith('claude'):  return 'claude'
     if model_name.startswith(('openai', 'gpt', 'o1', 'o3')):  return 'openai'
-    if model_name.startswith(('kimi', 'moonshotai/')):  return 'openrouter'
+    if model_name.startswith(('kimi', 'moonshotai/', 'grok', 'x-ai/', 'deepseek')):  return 'openrouter'
     raise ValueError(f'Unknown model: {model_name}')

@@ -1,1 +1,1 @@
-use mnt/... for C:/Users/misha/miniconda3/envs/telegrambot/python.exe
+Python is located at: /mnt/d/conda_envs/telegrambot/python.exe

@@ -17,7 +17,16 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 OPENROUTER_MODELS = [
     "kimi-k2",  # Short name for convenience
     "moonshotai/kimi-k2-0905",  # Full OpenRouter model ID
+    "grok-4.1-fast",  # Short name
+    "x-ai/grok-4.1-fast",  # Full OpenRouter model ID
+    "deepseek-v3.2",  # Short name
+    "deepseek/deepseek-v3.2",  # Full OpenRouter model ID
 ]
+
+# Models that support vision/image input (add new vision models here)
+VISION_CAPABLE_MODELS = {
+    "x-ai/grok-4.1-fast",
+}
 
 
 class OpenRouterService(BaseAIService):
@@ -58,8 +67,14 @@ class OpenRouterService(BaseAIService):
         """Map user-friendly model names to OpenRouter model IDs."""
         model_mapping = {
             "kimi-k2": "moonshotai/kimi-k2-0905",
+            "grok-4.1-fast": "x-ai/grok-4.1-fast",
+            "deepseek-v3.2": "deepseek/deepseek-v3.2",
         }
         return model_mapping.get(model_name, model_name)
+
+    def _supports_vision(self) -> bool:
+        """Check if the current model supports vision/image input."""
+        return self.openrouter_model in VISION_CAPABLE_MODELS
 
     async def analyze_video(self, video_data: bytes, mime_type: str, system_prompt: str) -> str:
         """
@@ -113,38 +128,42 @@ class OpenRouterService(BaseAIService):
                     content_parts = []
 
                     # Handle media content first
-                    if msg.media_type in ['image', 'sticker'] and msg.media_data:
-                        try:
-                            # Encode image to base64 for OpenRouter
-                            base64_data, media_type = self._encode_image_to_base64(msg.media_data)
+                    if msg.media_type in ['image', 'sticker']:
+                        if self._supports_vision() and msg.media_data:
+                            # Model supports vision - send image data
+                            try:
+                                base64_data, media_type = self._encode_image_to_base64(msg.media_data)
 
-                            # Check file size - OpenRouter has limits on media size
-                            if len(msg.media_data) > 20 * 1024 * 1024:  # 20MB limit
-                                logger.warning(f"Media file too large ({len(msg.media_data)} bytes), using description only for message {msg.message_id}")
-                                # Fall back to text description
+                                if len(msg.media_data) > 20 * 1024 * 1024:  # 20MB limit
+                                    logger.warning(f"Media file too large ({len(msg.media_data)} bytes), using description only for message {msg.message_id}")
+                                    if msg.media_description:
+                                        content_parts.append({
+                                            "type": "text",
+                                            "text": msg.media_description
+                                        })
+                                else:
+                                    content_parts.append({
+                                        "type": "image_url",
+                                        "image_url": {
+                                            "url": f"data:{media_type};base64,{base64_data}",
+                                            "detail": "high"
+                                        }
+                                    })
+                                    logger.info(f"Added image data for message {msg.message_id}: {len(base64_data)} base64 chars, MIME: {media_type}")
+                            except Exception as e:
+                                logger.error(f"Could not process media for msg {msg.message_id}: {e}", exc_info=True)
                                 if msg.media_description:
                                     content_parts.append({
                                         "type": "text",
-                                        "text": msg.media_description
+                                        "text": f"[{msg.media_type} could not be processed: {msg.media_description}]"
                                     })
-                            else:
-                                # Add image content
-                                content_parts.append({
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:{media_type};base64,{base64_data}",
-                                        "detail": "high"  # Use high detail for better analysis
-                                    }
-                                })
-                                logger.info(f"Added image data for message {msg.message_id}: {len(base64_data)} base64 chars, MIME: {media_type}")
-                        except Exception as e:
-                            logger.error(f"Could not process media for msg {msg.message_id}: {e}", exc_info=True)
-                            # Fall back to text description
-                            if msg.media_description:
-                                content_parts.append({
-                                    "type": "text",
-                                    "text": f"[{msg.media_type} could not be processed: {msg.media_description}]"
-                                })
+                        elif msg.media_description:
+                            # Model doesn't support vision - use text description
+                            content_parts.append({
+                                "type": "text",
+                                "text": msg.media_description
+                            })
+                            logger.info(f"Using text description for {msg.media_type} in message {msg.message_id} (model doesn't support vision)")
 
                     # Handle text content (including media descriptions for non-image media)
                     text_content = ""
